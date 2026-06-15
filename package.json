@@ -1,10 +1,14 @@
 {
   "name": "agent-army",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Coordinate persistent Codex agents through a Manager Agent",
+  "main": "agent-army.js",
+  "bin": {
+    "agent-army": "./agent-army.js"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node agent-army.js start",
+    "test": "node --test"
   },
   "keywords": [],
   "author": "",
