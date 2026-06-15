@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, readFileSync, mkdirSync, openSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, openSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { attachAgentPanes, refreshPane } from './src/tmux-panes.js';
+import { attachAgentPane, attachAgentPanes, closeAgentPane } from './src/tmux-panes.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const runtimeDir = join(root, '.agent-army');
+const runtimeDir = join(process.cwd(), '.agent-army');
 const stateFile = join(runtimeDir, 'state.json');
+const panesFile = join(runtimeDir, 'panes.json');
 const logFile = join(runtimeDir, 'server.log');
 const command = process.argv[2] ?? 'start';
 
@@ -49,17 +50,36 @@ async function ensureStarted() {
 
 function printState(state) {
   console.log(`Agent Army server: http://127.0.0.1:${state.apiPort}`);
+  if (state.runFile) console.log(`Run metadata: ${state.runFile}`);
   for (const [name, agent] of Object.entries(state.agents)) {
-    const bin = process.env.CODEX_BIN ?? 'codex';
-    console.log(`${name}: ${bin} resume --remote ws://127.0.0.1:${agent.port} ${agent.threadId}`);
+    console.log(`${name}: ${process.env.CODEX_BIN ?? 'codex'} resume --remote ws://127.0.0.1:${agent.port} ${agent.threadId}`);
   }
+}
+
+function writePanes(panes) {
+  if (Object.keys(panes).length) writeFileSync(panesFile, JSON.stringify(panes, null, 2));
+  else rmSync(panesFile, { force: true });
+}
+
+async function syncAgentPanes(state, panes, target, exec) {
+  for (const name of Object.keys(panes)) {
+    if (!state.agents?.[name]) closeAgentPane(name, panes, exec);
+  }
+  for (const name of Object.keys(state.agents ?? {})) {
+    attachAgentPane(name, state, panes, target, exec);
+  }
+  writePanes(panes);
 }
 
 async function interactive(state) {
   printState(state);
   const exec = (command, args) => execFileSync(command, args, { encoding: 'utf8' });
-  const panes = attachAgentPanes(state, process.env.TMUX_PANE, exec);
-  if (Object.keys(panes).length) console.log('Agent panes refresh after coordinated turns complete.');
+  const target = process.env.TMUX_PANE;
+  const panes = attachAgentPanes(state, target, exec);
+  if (Object.keys(panes).length) {
+    writePanes(panes);
+    console.log('Agent panes refresh after coordinated turns complete.');
+  }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   rl.setPrompt('[you] ');
   rl.prompt();
@@ -69,9 +89,8 @@ async function interactive(state) {
       const { response } = await request(state, '/message', { message: line });
       console.log(`\n[manager] ${response}\n`);
       const health = await request(state, '/health');
-      if (health.agents?.brainstorming?.status === 'completed') {
-        refreshPane('brainstorming', health, panes, exec);
-      }
+      await syncAgentPanes(health, panes, target, exec);
+      state = health;
     } catch (error) {
       console.error(error.message);
     }
@@ -91,6 +110,14 @@ if (command === 'start') {
   else printState(await request(state, '/health'));
 } else if (command === 'stop') {
   const state = readState();
+  if (existsSync(panesFile) && process.env.CMUX_WORKSPACE_ID) {
+    const exec = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8' });
+    const panes = JSON.parse(readFileSync(panesFile, 'utf8'));
+    for (const surfaceRef of Object.values(panes)) {
+      try { exec('cmux', ['close-surface', '--surface', surfaceRef]); } catch { /* already closed */ }
+    }
+    rmSync(panesFile, { force: true });
+  }
   if (state && alive(state)) await request(state, '/stop', {});
   console.log('Agent Army stopped');
 } else {

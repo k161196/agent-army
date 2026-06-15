@@ -1,12 +1,14 @@
-const AGENTS = ['manager', 'brainstorming'];
-const STATUSES = new Set(['starting', 'idle', 'working', 'blocked', 'completed', 'failed']);
+import { AGENT_NAMES } from './agents.js';
+
+const STATUSES = new Set(['not_started', 'starting', 'idle', 'working', 'blocked', 'completed', 'failed', 'closed']);
 
 export class Army {
-  constructor({ sendTurn }) {
+  constructor({ sendTurn, isAgentActive = () => true }) {
     this.sendTurn = sendTurn;
-    this.agents = new Map(AGENTS.map(name => [name, {
+    this.isAgentActive = isAgentActive;
+    this.agents = new Map(AGENT_NAMES.map(name => [name, {
       name,
-      status: 'idle',
+      status: name === 'manager' ? 'idle' : 'not_started',
       messages: [],
       turnQueue: Promise.resolve(),
     }]));
@@ -26,6 +28,7 @@ export class Army {
 
   async sendAgentMessage(name, message) {
     const agent = this.#agent(name);
+    if (!this.isAgentActive(name)) throw new Error(`agent is not active: ${name}. Spawn it before sending messages.`);
     const run = async () => {
       agent.status = 'working';
       agent.messages.push({ from: 'manager', message });
@@ -64,6 +67,11 @@ export class Army {
     });
     this.#drainManager();
     return { ok: true };
+  }
+
+  setAgentStatus(name, status) {
+    if (!STATUSES.has(status)) throw new Error(`invalid status: ${status}`);
+    this.#agent(name).status = status;
   }
 
   whenIdle() {
