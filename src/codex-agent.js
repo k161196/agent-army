@@ -34,6 +34,7 @@ export class CodexAgent {
     this.pending = new Map();
     this.nextId = 1;
     this.activeTurn = null;
+    this.idleWaiters = [];
   }
 
   async start() {
@@ -78,6 +79,22 @@ export class CodexAgent {
     return this;
   }
 
+  isBusy() {
+    return Boolean(this.activeTurn);
+  }
+
+  waitForIdle({ timeoutMs = 5000 } = {}) {
+    if (!this.activeTurn) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const waiter = { resolve, reject, timer: null };
+      waiter.timer = setTimeout(() => {
+        this.idleWaiters = this.idleWaiters.filter(item => item !== waiter);
+        reject(new Error(`${this.name} active turn did not stop within ${timeoutMs}ms`));
+      }, timeoutMs);
+      this.idleWaiters.push(waiter);
+    });
+  }
+
   async sendTurn(text) {
     if (this.activeTurn) throw new Error(`${this.name} already has an active turn`);
     return new Promise(async (resolve, reject) => {
@@ -90,6 +107,7 @@ export class CodexAgent {
       } catch (error) {
         this.activeTurn = null;
         reject(error);
+        this.#resolveIdleWaiters();
       }
     });
   }
@@ -131,11 +149,20 @@ export class CodexAgent {
       const turn = this.activeTurn;
       this.activeTurn = null;
       turn.resolve(turn.response);
+      this.#resolveIdleWaiters();
     }
     if (message.method === 'error' && this.activeTurn) {
       const turn = this.activeTurn;
       this.activeTurn = null;
       turn.reject(new Error(message.params?.error?.message ?? 'Codex turn failed'));
+      this.#resolveIdleWaiters();
+    }
+  }
+
+  #resolveIdleWaiters() {
+    for (const waiter of this.idleWaiters.splice(0)) {
+      clearTimeout(waiter.timer);
+      waiter.resolve();
     }
   }
 

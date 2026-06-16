@@ -31,23 +31,44 @@ export class Army {
     return this.#agent(name);
   }
 
-  async sendAgentMessage(name, message) {
+  markAgentInterrupted(name) {
+    const agent = this.#agent(name);
+    agent.intentionalInterrupt = true;
+    agent.interruptGeneration += 1;
+    agent.messages.push({
+      from: 'system',
+      event: 'interrupted',
+      message: 'Manager interrupted active turn before follow-up.',
+    });
+  }
+
+  async sendAgentMessage(name, message, { bypassQueueAfterInterrupt = false } = {}) {
     const agent = this.#agent(name);
     if (!this.isAgentActive(name)) throw new Error(`agent is not active: ${name}. Spawn it before sending messages.`);
+    const interruptGeneration = agent.interruptGeneration;
     const run = async () => {
+      if (!bypassQueueAfterInterrupt && interruptGeneration !== agent.interruptGeneration) {
+        throw new Error(`${name} queued message was interrupted before it was sent`);
+      }
       agent.status = 'working';
       agent.messages.push({ from: 'manager', message });
       try {
         const response = await this.sendTurn(name, message);
         agent.messages.push({ from: name, message: response });
+        agent.intentionalInterrupt = false;
         if (agent.status === 'working') agent.status = 'completed';
         return response;
       } catch (error) {
-        agent.status = 'failed';
+        if (agent.intentionalInterrupt) {
+          agent.intentionalInterrupt = false;
+          if (agent.status === 'working') agent.status = 'idle';
+        } else {
+          agent.status = 'failed';
+        }
         throw error;
       }
     };
-    const result = agent.turnQueue.then(run, run);
+    const result = bypassQueueAfterInterrupt ? run() : agent.turnQueue.then(run, run);
     agent.turnQueue = result.catch(() => {});
     return result;
   }
@@ -97,6 +118,8 @@ export class Army {
       status: initialStatus,
       messages: [],
       turnQueue: Promise.resolve(),
+      intentionalInterrupt: false,
+      interruptGeneration: 0,
     };
   }
 

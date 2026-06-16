@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { attachAgentPane, closeAgentPane } from './tmux-panes.js';
+import { attachAgentPane, closeAgentPane, sendInterruptKey } from './tmux-panes.js';
 
 export function readPanes(panesFile) {
   if (!existsSync(panesFile)) return {};
@@ -52,4 +52,8 @@ export function closeLifecycleAgentPane(name, { panesFile, exec }) {
   const closed = closeAgentPane(name, panes, exec);
   writePanes(panesFile, panes);
   return closed;
+}
+
+export function interruptLifecycleAgentPane(name, { panesFile, exec }) {
+  return sendInterruptKey(name, readPanes(panesFile), exec);
 }

@@ -5,8 +5,9 @@ import { AGENT_NAMES, prompts } from '../src/agents.js';
 
 const deferred = () => {
   let resolve;
-  const promise = new Promise(r => { resolve = r; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((r, j) => { resolve = r; reject = j; });
+  return { promise, resolve, reject };
 };
 
 test('serializes turns sent to the same agent', async () => {
@@ -32,6 +33,72 @@ test('serializes turns sent to the same agent', async () => {
     ['brainstorming', 'first'],
     ['brainstorming', 'second'],
   ]);
+});
+
+test('intentional interrupt rejection does not leave agent failed before follow-up', async () => {
+  const active = deferred();
+  const calls = [];
+  const army = new Army({
+    isAgentActive: name => name === 'debug',
+    sendTurn: async (agent, message) => {
+      calls.push([agent, message]);
+      if (message === 'slow') await active.promise;
+      return `${message} response`;
+    },
+  });
+
+  const slow = army.sendAgentMessage('debug', 'slow');
+  await Promise.resolve();
+  army.markAgentInterrupted('debug');
+  active.reject(new Error('cancelled'));
+  await assert.rejects(slow, /cancelled/);
+
+  assert.equal(army.getAgentStatus('debug'), 'idle');
+  assert.deepEqual(army.listAgentMessages('debug').at(-1), {
+    from: 'system',
+    event: 'interrupted',
+    message: 'Manager interrupted active turn before follow-up.',
+  });
+
+  assert.equal(
+    await army.sendAgentMessage('debug', 'follow-up', { bypassQueueAfterInterrupt: true }),
+    'follow-up response',
+  );
+  assert.equal(army.getAgentStatus('debug'), 'completed');
+  assert.deepEqual(calls, [['debug', 'slow'], ['debug', 'follow-up']]);
+});
+
+test('interrupt bypass skips stale queued messages for the same agent', async () => {
+  const active = deferred();
+  const followUp = deferred();
+  const calls = [];
+  const army = new Army({
+    isAgentActive: name => name === 'debug',
+    sendTurn: async (agent, message) => {
+      calls.push([agent, message]);
+      if (message === 'slow') await active.promise;
+      if (message === 'interrupt follow-up') await followUp.promise;
+      return `${message} response`;
+    },
+  });
+
+  const slow = army.sendAgentMessage('debug', 'slow');
+  const stale = army.sendAgentMessage('debug', 'stale queued');
+  await Promise.resolve();
+  army.markAgentInterrupted('debug');
+  active.reject(new Error('cancelled'));
+  await assert.rejects(slow, /cancelled/);
+  await Promise.resolve();
+
+  const interruptFollowUp = army.sendAgentMessage('debug', 'interrupt follow-up', {
+    bypassQueueAfterInterrupt: true,
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(calls, [['debug', 'slow'], ['debug', 'interrupt follow-up']]);
+  await assert.rejects(stale, /interrupted before it was sent/);
+  followUp.resolve();
+  assert.equal(await interruptFollowUp, 'interrupt follow-up response');
 });
 
 test('prioritizes queued user messages before agent reports', async () => {

@@ -35,7 +35,11 @@ test('maps manager and agent tools to HTTP API calls', async () => {
     return { ok: true };
   };
 
+  const sendTool = toolDefinitions('manager').find(tool => tool.name === 'send_agent_message');
+  assert.equal(sendTool.inputSchema.properties.interrupt.type, 'boolean');
+
   await callTool('manager', 'send_agent_message', { agent: 'brainstorming', message: 'think' }, request);
+  await callTool('manager', 'send_agent_message', { agent: 'debug', message: 'stop and inspect', interrupt: true }, request);
   await callTool('manager', 'spawn_agent', { agent: 'debug', title: 'Fix test', contextKey: 'bug:test' }, request);
   await callTool('manager', 'close_agent', { agent: 'debug', summary: 'Fixed test', contextKey: 'bug:test' }, request);
   await callTool('manager', 'list_run_agents', {}, request);
@@ -50,7 +54,8 @@ test('maps manager and agent tools to HTTP API calls', async () => {
   await callTool('tester', 'report_status', { status: 'completed', message: 'verified' }, request);
 
   assert.deepEqual(calls, [
-    ['/agents/brainstorming/messages', { message: 'think' }],
+    ['/agents/brainstorming/messages', { message: 'think', interrupt: false }],
+    ['/agents/debug/messages', { message: 'stop and inspect', interrupt: true }],
     ['/agents/debug/spawn', { title: 'Fix test', contextKey: 'bug:test' }],
     ['/agents/debug/close', { summary: 'Fixed test', contextKey: 'bug:test' }],
     ['/run', undefined],

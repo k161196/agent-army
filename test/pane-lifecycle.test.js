@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attachInitialAgentPanes, attachLifecycleAgentPane, closeLifecycleAgentPane } from '../src/pane-lifecycle.js';
+import { attachInitialAgentPanes, attachLifecycleAgentPane, closeLifecycleAgentPane, interruptLifecycleAgentPane } from '../src/pane-lifecycle.js';
 
 function withCmux(callback) {
   const previous = process.env.CMUX_WORKSPACE_ID;
@@ -128,6 +128,30 @@ test('lifecycle close removes empty pane mapping files', () => {
       });
 
       assert.equal(existsSync(panesFile), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('lifecycle interrupt reads persisted panes without mutating missing mappings', () => {
+  withCmux(() => {
+    const dir = mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+    const panesFile = join(dir, 'panes.json');
+    try {
+      writeFileSync(panesFile, JSON.stringify({ debug: 'surface:1' }));
+      const calls = [];
+
+      assert.deepEqual(interruptLifecycleAgentPane('debug-2', {
+        panesFile,
+        exec: (command, args) => calls.push([command, args]),
+      }), {
+        ok: false,
+        reason: 'no pane is attached; retry without interrupt or attach panes first',
+      });
+
+      assert.deepEqual(JSON.parse(readFileSync(panesFile, 'utf8')), { debug: 'surface:1' });
+      assert.deepEqual(calls, []);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -1,9 +1,9 @@
 const schemas = {
   send_agent_message: {
-    description: 'Send work or a follow-up to a runtime agent id returned by spawn_agent and wait for its response.',
+    description: 'Send work or a follow-up to a runtime agent id returned by spawn_agent and wait for its response. By default this queues behind active work; interrupt: true attempts to cancel active work before sending.',
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string' }, message: { type: 'string' } },
+      properties: { agent: { type: 'string' }, message: { type: 'string' }, interrupt: { type: 'boolean' } },
       required: ['agent', 'message'],
     },
   },
@@ -131,7 +131,7 @@ export async function callTool(context, name, args, request) {
   if (!(capabilities[role] ?? []).includes(name)) throw new Error(`tool ${name} is not available to ${role}`);
   switch (name) {
     case 'send_agent_message':
-      return request(`/agents/${args.agent}/messages`, { message: args.message });
+      return request(`/agents/${args.agent}/messages`, { message: args.message, interrupt: args.interrupt ?? false });
     case 'get_agent_status':
       return request(`/agents/${args.agent}/status`);
     case 'list_agent_messages':

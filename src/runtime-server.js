@@ -9,7 +9,7 @@ import { AGENT_NAMES, isKnownAgentType, isManagerType, promptForType } from './a
 import { AgentIdAllocator } from './agent-id-allocator.js';
 import { Army } from './army.js';
 import { CodexAgent } from './codex-agent.js';
-import { attachLifecycleAgentPane, closeLifecycleAgentPane } from './pane-lifecycle.js';
+import { attachLifecycleAgentPane, closeLifecycleAgentPane, interruptLifecycleAgentPane } from './pane-lifecycle.js';
 import { RunState } from './run-state.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -95,8 +95,7 @@ const server = createServer(async (req, res) => {
       if (req.method === 'GET' && resource === 'status') return json(res, 200, { status: army.getAgentStatus(name) });
       if (req.method === 'GET' && resource === 'messages') return json(res, 200, army.listAgentMessages(name));
       if (req.method === 'POST' && resource === 'messages') {
-        const { message } = await body(req);
-        return json(res, 200, { response: await army.sendAgentMessage(name, message) });
+        return json(res, 200, { response: await sendAgentMessage(name, await body(req)) });
       }
       if (req.method === 'POST' && resource === 'status') {
         const value = await body(req);
@@ -164,6 +163,30 @@ function syncPaneClose(agentId) {
   }
 }
 
+async function sendAgentMessage(name, { message, interrupt = false } = {}) {
+  if (!interrupt || army.getAgentStatus(name) !== 'working') {
+    return army.sendAgentMessage(name, message);
+  }
+
+  const agent = codexAgents.get(name);
+  if (!agent) return army.sendAgentMessage(name, message);
+  if (!agent.isBusy()) return army.sendAgentMessage(name, message);
+
+  const interrupted = interruptLifecycleAgentPane(name, {
+    panesFile,
+    exec: (command, args) => execFileSync(command, args, { encoding: 'utf8' }),
+  });
+  if (!interrupted.ok) throw new Error(`cannot interrupt ${name}: ${interrupted.reason}`);
+
+  army.markAgentInterrupted(name);
+  try {
+    await agent.waitForIdle({ timeoutMs: 5000 });
+  } catch {
+    throw new Error(`interrupt sent to ${name} but active turn did not stop within 5s`);
+  }
+  return army.sendAgentMessage(name, message, { bypassQueueAfterInterrupt: true });
+}
+
 function validateSpawnTarget(type) {
   if (!isKnownAgentType(type)) throw new Error(`unknown agent: ${type}`);
   if (isManagerType(type)) throw new Error('manager is always started by Agent Army');
@@ -202,8 +225,8 @@ async function startCodexAgent(agentId, type, { metadata = {}, task } = {}) {
     metadata,
     task,
   });
-  writeState();
   syncPaneSpawn(agentId);
+  writeState();
   return agent;
 }
 

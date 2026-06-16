@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { attachAgentPane, attachAgentPanes, closeAgentPane, refreshAgentPanes } from '../src/tmux-panes.js';
+import { attachAgentPane, attachAgentPanes, closeAgentPane, refreshAgentPanes, sendInterruptKey } from '../src/tmux-panes.js';
 
 const state = {
   cwd: '/workspace',
@@ -144,6 +144,16 @@ test('closeAgentPane kills tmux pane and removes mapping', () => {
   });
 });
 
+test('tmux interrupt sends Escape to the agent pane', () => {
+  withoutCmux(() => {
+    const calls = [];
+    assert.deepEqual(sendInterruptKey('debug', { debug: '%11' }, (command, args) => calls.push([command, args])), {
+      ok: true,
+    });
+    assert.deepEqual(calls, [['tmux', ['send-keys', '-t', '%11', 'Escape']]]);
+  });
+});
+
 test('cmux attach renames new tab to the agent role', () => {
   withCmux(() => {
     const calls = [];
@@ -167,6 +177,16 @@ test('cmux attach renames new tab to the agent role', () => {
     assert.deepEqual(calls.find(([, args]) => args[0] === 'rename-tab')?.[1], [
       'rename-tab', '--surface', 'surface:2', 'manager',
     ]);
+  });
+});
+
+test('cmux interrupt sends escape to the agent surface', () => {
+  withCmux(() => {
+    const calls = [];
+    assert.deepEqual(sendInterruptKey('debug', { debug: 'surface:2' }, (command, args) => calls.push([command, args])), {
+      ok: true,
+    });
+    assert.deepEqual(calls, [['cmux', ['send-key', '--surface', 'surface:2', 'escape']]]);
   });
 });
 

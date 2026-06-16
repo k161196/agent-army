@@ -60,6 +60,21 @@ export function closeAgentPane(name, panes, exec) {
   return true;
 }
 
+export function sendInterruptKey(name, panes, exec) {
+  const pane = panes[name];
+  if (!pane) return { ok: false, reason: 'no pane is attached; retry without interrupt or attach panes first' };
+  try {
+    if (process.env.CMUX_WORKSPACE_ID) {
+      exec('cmux', ['send-key', '--surface', pane, 'escape']);
+    } else {
+      exec('tmux', ['send-keys', '-t', pane, 'Escape']);
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: `failed to send interrupt to ${pane}: ${error.message}` };
+  }
+}
+
 // --- cmux ---
 
 function cmuxPaneRefs(exec) {
