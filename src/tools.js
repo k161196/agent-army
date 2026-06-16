@@ -1,6 +1,6 @@
 const schemas = {
   send_agent_message: {
-    description: 'Send work or a follow-up to a named agent and wait for its response.',
+    description: 'Send work or a follow-up to a runtime agent id returned by spawn_agent and wait for its response.',
     inputSchema: {
       type: 'object',
       properties: { agent: { type: 'string' }, message: { type: 'string' } },
@@ -8,7 +8,7 @@ const schemas = {
     },
   },
   get_agent_status: {
-    description: 'Get the current status of a named agent.',
+    description: 'Get the current status of a runtime agent id returned by spawn_agent.',
     inputSchema: {
       type: 'object',
       properties: { agent: { type: 'string' } },
@@ -16,7 +16,7 @@ const schemas = {
     },
   },
   list_agent_messages: {
-    description: 'List messages associated with a named agent.',
+    description: 'List messages associated with a runtime agent id returned by spawn_agent.',
     inputSchema: {
       type: 'object',
       properties: { agent: { type: 'string' } },
@@ -24,11 +24,12 @@ const schemas = {
     },
   },
   spawn_agent: {
-    description: 'Start a known specialist Agent for a task. For closed prior sessions, this resumes context by injecting the prior summary/session ID into a fresh thread.',
+    description: 'Start a known specialist Agent type for a task. Returns agentId; use that id for follow-up tools. For closed prior sessions, this resumes context by injecting the prior summary/session ID into a fresh thread.',
     inputSchema: {
       type: 'object',
       properties: {
         agent: { type: 'string' },
+        agentId: { type: 'string' },
         title: { type: 'string' },
         taskId: { type: 'string' },
         contextKey: { type: 'string' },
@@ -39,7 +40,7 @@ const schemas = {
     },
   },
   close_agent: {
-    description: 'Close an active specialist Agent and optionally store a concise completed-task summary for later Manager routing.',
+    description: 'Close an active runtime agent id and optionally store a concise completed-task summary for later Manager routing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,6 +75,7 @@ const schemas = {
             type: 'object',
             properties: {
               agent: { type: 'string' },
+              type: { type: 'string' },
               sessionId: { type: 'string' },
               threadId: { type: 'string' },
             },
@@ -113,11 +115,19 @@ const capabilities = {
   tester: ['report_status'],
 };
 
-export function toolDefinitions(role) {
-  return (capabilities[role] ?? []).map(name => ({ name, ...schemas[name] }));
+function toolContext(value) {
+  return typeof value === 'string' ? { role: value, agentId: value } : {
+    role: value.role,
+    agentId: value.agentId ?? value.role,
+  };
 }
 
-export async function callTool(role, name, args, request) {
+export function toolDefinitions(role) {
+  return (capabilities[toolContext(role).role] ?? []).map(name => ({ name, ...schemas[name] }));
+}
+
+export async function callTool(context, name, args, request) {
+  const { role, agentId } = toolContext(context);
   if (!(capabilities[role] ?? []).includes(name)) throw new Error(`tool ${name} is not available to ${role}`);
   switch (name) {
     case 'send_agent_message':
@@ -146,7 +156,7 @@ export async function callTool(role, name, args, request) {
         agentSessions: args.agentSessions ?? [],
       });
     case 'report_status':
-      return request(`/agents/${role}/status`, { status: args.status, message: args.message });
+      return request(`/agents/${agentId}/status`, { status: args.status, message: args.message });
     default:
       throw new Error(`unknown tool: ${name}`);
   }

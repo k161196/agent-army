@@ -65,3 +65,19 @@ test('maps manager and agent tools to HTTP API calls', async () => {
     ['/agents/tester/status', { status: 'completed', message: 'verified' }],
   ]);
 });
+
+test('routes specialist status reports by runtime agent id when present', async () => {
+  const calls = [];
+  const request = async (path, body) => {
+    calls.push([path, body]);
+    return { ok: true };
+  };
+
+  await callTool({ role: 'debug', agentId: 'debug-2' }, 'report_status', { status: 'completed', message: 'done' }, request);
+  await callTool('debug', 'report_status', { status: 'completed', message: 'legacy' }, request);
+
+  assert.deepEqual(calls, [
+    ['/agents/debug-2/status', { status: 'completed', message: 'done' }],
+    ['/agents/debug/status', { status: 'completed', message: 'legacy' }],
+  ]);
+});

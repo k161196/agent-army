@@ -79,6 +79,56 @@ test('not-started specialists fail clearly when messaged before spawn', async ()
   );
 });
 
+test('dynamic agents of the same type keep independent turn queues', async () => {
+  const debug = deferred();
+  const calls = [];
+  const army = new Army({
+    isAgentActive: name => name === 'debug' || name === 'debug-2',
+    sendTurn: async (agent, message) => {
+      calls.push([agent, message]);
+      if (agent === 'debug' && message === 'slow') await debug.promise;
+      return `${agent}:${message}`;
+    },
+  });
+  army.ensureAgent('debug', { type: 'debug', initialStatus: 'idle' });
+  army.ensureAgent('debug-2', { type: 'debug', initialStatus: 'idle' });
+
+  const slow = army.sendAgentMessage('debug', 'slow');
+  const fast = army.sendAgentMessage('debug-2', 'fast');
+  await Promise.resolve();
+
+  assert.deepEqual(calls, [['debug', 'slow'], ['debug-2', 'fast']]);
+  assert.equal(await fast, 'debug-2:fast');
+  debug.resolve();
+  assert.equal(await slow, 'debug:slow');
+});
+
+test('messaging an unspawned generated id fails clearly', async () => {
+  const army = new Army({ sendTurn: async () => 'ok', isAgentActive: name => name === 'debug' });
+
+  await assert.rejects(
+    () => army.sendAgentMessage('debug-2', 'hello'),
+    /unknown agent: debug-2/i,
+  );
+});
+
+test('reports from dynamic runtime ids are attributed to that id', async () => {
+  const calls = [];
+  const army = new Army({ sendTurn: async (agent, message) => { calls.push([agent, message]); return 'ok'; } });
+  army.ensureAgent('debug-2', { type: 'debug', initialStatus: 'idle' });
+
+  army.reportStatus('debug-2', 'completed', 'isolated root cause');
+  await army.whenIdle();
+
+  assert.equal(army.getAgentStatus('debug-2'), 'completed');
+  assert.deepEqual(army.listAgentMessages('debug-2'), [{
+    from: 'debug-2',
+    status: 'completed',
+    message: 'isolated root cause',
+  }]);
+  assert.deepEqual(calls, [['manager', '[debug-2 reported completed]\nisolated root cause']]);
+});
+
 test('registers specialist agents that can report status', async () => {
   assert.deepEqual(AGENT_NAMES, ['manager', 'brainstorming', 'implementation', 'debug', 'tester']);
 

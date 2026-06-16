@@ -2,12 +2,12 @@
 
 Agent Army coordinates a group of specialized Codex work sessions that collaborate on a shared objective.
 
-Current runtime roles are Manager, Brainstorming, Implementation, Debug, and Tester.
+Current specialist types are Manager, Brainstorming, Implementation, Debug, and Tester. A runtime **Agent** instance also has a unique id, such as `debug` or `debug-2`.
 
 ## Language
 
 **Agent**:
-A named Codex role with a defined job. Active **Agents** are isolated behind their own app-server; inactive specialist **Agents** remain known to the **Manager Agent** until spawned.
+A runtime Codex session with a specialist type and a unique runtime id. Active **Agents** are isolated behind their own app-server; inactive specialist types remain known to the **Manager Agent** until spawned. For example, `debug` and `debug-2` can both be Debug Agent instances in one run.
 _Avoid_: Worker, bot
 
 **Agent Army**:
@@ -39,7 +39,7 @@ A message from an **Agent** to the **Manager Agent** describing work, a request,
 _Avoid_: Peer message, direct agent message
 
 **Agent Status**:
-The server-owned source of truth for an **Agent's** lifecycle. An **Agent Status** is not_started, starting, idle, working, blocked, completed, failed, or closed; completed means ready for Manager review, while closed means the live app-server was stopped and only run metadata remains.
+The server-owned source of truth for a runtime **Agent's** lifecycle. An **Agent Status** is not_started, starting, idle, working, blocked, completed, failed, or closed; completed means ready for Manager review, while closed means the live app-server was stopped and only run metadata remains.
 _Avoid_: Agent state, availability
 
 **Completed Context**:

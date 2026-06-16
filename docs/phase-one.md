@@ -17,6 +17,7 @@ Phase one proves that a Manager Agent can coordinate specialist Agents while eac
 
 - Phase one contains Manager, Brainstorming, Implementation, Debug, and Tester Agents.
 - Each active Agent has its own app-server and port.
+- A specialist type may have more than one active runtime Agent instance; ids such as `debug` and `debug-2` identify the instances.
 - All inter-agent communication routes through the Manager Agent.
 - The Manager Agent coordinates through structured server tools rather than free-form output parsing.
 - Codex built-in child agents are disabled so Manager delegation cannot bypass the named Agent Army sessions.
@@ -26,14 +27,14 @@ Phase one proves that a Manager Agent can coordinate specialist Agents while eac
 
 ## Manager Tools
 
-- `spawn_agent(agent, title, taskId, contextKey, resumeSessionId, contextSummary)` starts a specialist Agent. When `resumeSessionId` is supplied, Agent Army resumes context in a fresh thread by injecting the prior summary/session ID.
-- `close_agent(agent, summary, title, contextKey, status)` closes an active specialist Agent and records optional summary metadata.
+- `spawn_agent(agent, agentId, title, taskId, contextKey, resumeSessionId, contextSummary)` starts a specialist Agent type and returns `agentId`, the runtime id to use for follow-up tools. `agentId` is optional; Agent Army generates one when omitted. When `resumeSessionId` is supplied, Agent Army resumes context in a fresh thread by injecting the prior summary/session ID.
+- `close_agent(agent, summary, title, contextKey, status)` closes an active runtime Agent id and records optional summary metadata.
 - `list_run_agents()` returns active and historical Agent records for the current run.
 - `list_completed_contexts()` returns completed context summaries and session IDs recorded in the current run.
 - `record_task_summary(contextKey, title, summary, agentSessions)` records a cross-agent completed context summary.
-- `send_agent_message(agent, message)` sends work or a follow-up to a named Agent.
-- `get_agent_status(agent)` returns the named Agent's current Agent Status.
-- `list_agent_messages(agent)` returns messages associated with the named Agent.
+- `send_agent_message(agent, message)` sends work or a follow-up to a runtime Agent id.
+- `get_agent_status(agent)` returns the runtime Agent's current Agent Status.
+- `list_agent_messages(agent)` returns messages associated with the runtime Agent.
 
 The Agent Army server exposes these tools through a local MCP server configured only for the Manager Agent.
 
@@ -60,7 +61,7 @@ User messages enter the same serialized inbox. After the active Manager turn com
 
 Each active Agent pane is visible and interactive. Direct interaction is an escape hatch for debugging or intervention: messages typed directly into an Agent pane bypass the Manager inbox and are not guaranteed to be visible to the coordination logic. Normal user work enters through the original Agent Army terminal.
 
-When started inside tmux, Agent Army creates one pane for the Manager and creates specialist panes as the Manager spawns them. Panes are named `Agent Army: <agent>`. When started outside tmux, Agent Army continues headlessly and prints attach commands for active Agent sessions.
+When started inside tmux, Agent Army creates one pane for the Manager and creates specialist panes as the Manager spawns them. Panes are named with runtime ids, such as `Agent Army: debug` and `Agent Army: debug-2`. When started outside tmux, Agent Army continues headlessly and prints attach commands for active Agent sessions.
 
 Codex app-server sends live turn events only to the connection that starts a turn. Agent Army syncs panes after each coordinated Manager response so newly active specialists are attached and closed specialists are removed.
 

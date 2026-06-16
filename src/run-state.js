@@ -48,11 +48,14 @@ export class RunState {
   }
 
   recordSpawn(agent, values) {
-    const previous = this.run.agents[agent] ?? { agent, tasks: [] };
+    const type = values.type ?? values.agentType ?? agent;
+    const previous = this.run.agents[agent] ?? { agent, agentId: agent, type, tasks: [] };
     const spawnedAt = iso(this.now());
     this.run.agents[agent] = {
       ...previous,
       agent,
+      agentId: agent,
+      type,
       status: 'active',
       spawnedAt,
       closedAt: null,
@@ -106,7 +109,7 @@ export class RunState {
         contextKey: contextKey ?? task?.contextKey ?? `${agent}:${record.sessionId}`,
         title: title ?? task?.title ?? `${agent} task`,
         summary,
-        agentSessions: [{ agent, sessionId: record.sessionId, threadId: record.threadId }],
+        agentSessions: [{ agent, type: record.type ?? agent, sessionId: record.sessionId, threadId: record.threadId }],
       });
     }
     this.#event('agent.closed', agent, { sessionId: record.sessionId });
@@ -133,6 +136,9 @@ export class RunState {
     return Object.fromEntries(Object.entries(this.run.agents)
       .filter(([, agent]) => agent.status === 'active')
       .map(([name, agent]) => [name, {
+        agent: name,
+        agentId: name,
+        type: agent.type ?? name,
         port: agent.port,
         threadId: agent.threadId,
         sessionId: agent.sessionId,

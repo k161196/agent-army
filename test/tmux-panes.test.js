@@ -78,6 +78,42 @@ test('dynamically attaches one specialist pane and renames it', () => {
   });
 });
 
+test('attaches multiple same-type runtime ids as distinct panes', () => {
+  withoutCmux(() => {
+    const active = {
+      cwd: '/workspace',
+      agents: {
+        debug: { port: 1003, threadId: 'debug-thread', type: 'debug' },
+        'debug-2': { port: 1004, threadId: 'debug-thread-2', type: 'debug' },
+      },
+    };
+    const calls = [];
+    const panes = attachAgentPanes(active, '%1', (command, args) => {
+      calls.push([command, args]);
+      if (args[0] === 'split-window') return `%${10 + calls.filter(([, item]) => item[0] === 'split-window').length}\n`;
+      return '';
+    });
+
+    assert.deepEqual(Object.keys(panes), ['debug', 'debug-2']);
+    assert.match(calls.find(([, args]) => args.at(-1)?.includes('debug-thread-2'))?.[1].at(-1), /1004 debug-thread-2/);
+    assert.deepEqual(calls.filter(([, args]) => args[0] === 'select-pane').map(([, args]) => args.at(-1)), [
+      'Agent Army: debug',
+      'Agent Army: debug-2',
+    ]);
+  });
+});
+
+test('closing one same-type runtime id leaves the other pane mapping intact', () => {
+  withoutCmux(() => {
+    const panes = { debug: '%11', 'debug-2': '%12' };
+    const calls = [];
+    assert.equal(closeAgentPane('debug-2', panes, (command, args) => calls.push([command, args])), true);
+
+    assert.deepEqual(panes, { debug: '%11' });
+    assert.deepEqual(calls, [['tmux', ['kill-pane', '-t', '%12']]]);
+  });
+});
+
 test('refreshAgentPanes refreshes active panes only', () => {
   withoutCmux(() => {
     const active = {

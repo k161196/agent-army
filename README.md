@@ -18,4 +18,4 @@ node agent-army.js status
 node agent-army.js stop
 ```
 
-Inside tmux, `start` initially creates an interactive pane for the Manager session. As the Manager spawns specialists, Agent Army creates named panes such as `Agent Army: implementation`; when specialists are closed, their panes are removed. Outside tmux, it prints attach commands for active sessions. `.agent-army/state.json` contains active sessions only, while `.agent-army/runs/<runId>.json` stores per-run config, spawn metadata, session IDs, and completed context summaries.
+Inside tmux, `start` initially creates an interactive pane for the Manager session. As the Manager spawns specialists, Agent Army creates named panes such as `Agent Army: implementation`, `Agent Army: debug`, or `Agent Army: debug-2`; when specialists are closed, their panes are removed. Outside tmux, it prints attach commands for active sessions. `.agent-army/state.json` contains active sessions only, while `.agent-army/runs/<runId>.json` stores per-run config, spawn metadata, session IDs, and completed context summaries.

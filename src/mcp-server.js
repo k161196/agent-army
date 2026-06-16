@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline';
 import { toolDefinitions, callTool } from './tools.js';
 
 const role = process.env.AGENT_ARMY_ROLE;
+const agentId = process.env.AGENT_ARMY_AGENT_ID ?? role;
 const api = process.env.AGENT_ARMY_API;
 
 async function request(path, body) {
@@ -36,7 +37,7 @@ async function handle(message) {
         result = { tools: toolDefinitions(role) };
         break;
       case 'tools/call': {
-        const value = await callTool(role, message.params.name, message.params.arguments ?? {}, request);
+        const value = await callTool({ role, agentId }, message.params.name, message.params.arguments ?? {}, request);
         result = { content: [{ type: 'text', text: JSON.stringify(value) }] };
         break;
       }

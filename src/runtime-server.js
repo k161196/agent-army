@@ -1,18 +1,22 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AGENT_NAMES, prompts } from './agents.js';
+import { AGENT_NAMES, isKnownAgentType, isManagerType, promptForType } from './agents.js';
+import { AgentIdAllocator } from './agent-id-allocator.js';
 import { Army } from './army.js';
 import { CodexAgent } from './codex-agent.js';
+import { attachLifecycleAgentPane, closeLifecycleAgentPane } from './pane-lifecycle.js';
 import { RunState } from './run-state.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const cwd = process.env.AGENT_ARMY_CWD ?? root;
 const runtimeDir = join(cwd, '.agent-army');
 const stateFile = join(runtimeDir, 'state.json');
+const panesFile = join(runtimeDir, 'panes.json');
 const mcpScript = join(root, 'src', 'mcp-server.js');
 const codexBin = process.env.CODEX_BIN ?? 'codex';
 const sandbox = process.env.AGENT_ARMY_SANDBOX ?? 'workspace-write';
@@ -118,6 +122,9 @@ function state() {
     runId: runState.run.runId,
     runFile: runState.runFile,
     agents: Object.fromEntries([...codexAgents].map(([name, agent]) => [name, {
+      agent: name,
+      agentId: name,
+      type: runState.run.agents[name]?.type ?? agent.role ?? name,
       port: agent.port,
       threadId: agent.threadId,
       sessionId: agent.threadId,
@@ -131,24 +138,64 @@ function writeState() {
   writeFileSync(stateFile, JSON.stringify(state(), null, 2));
 }
 
-function validateSpawnTarget(name) {
-  if (!AGENT_NAMES.includes(name)) throw new Error(`unknown agent: ${name}`);
-  if (name === 'manager') throw new Error('manager is always started by Agent Army');
-  if (codexAgents.has(name)) throw new Error(`agent is already active: ${name}`);
+function syncPaneSpawn(agentId) {
+  const target = process.env.TMUX_PANE;
+  if (!process.env.CMUX_WORKSPACE_ID && !target) return;
+  try {
+    attachLifecycleAgentPane(agentId, state(), {
+      panesFile,
+      target,
+      exec: (command, args) => execFileSync(command, args, { encoding: 'utf8' }),
+    });
+  } catch (error) {
+    console.error(`failed to attach pane for ${agentId}: ${error.message}`);
+  }
 }
 
-async function startCodexAgent(name, { metadata = {}, task } = {}) {
+function syncPaneClose(agentId) {
+  if (!process.env.CMUX_WORKSPACE_ID && !process.env.TMUX_PANE) return;
+  try {
+    closeLifecycleAgentPane(agentId, {
+      panesFile,
+      exec: (command, args) => execFileSync(command, args, { encoding: 'utf8' }),
+    });
+  } catch (error) {
+    console.error(`failed to close pane for ${agentId}: ${error.message}`);
+  }
+}
+
+function validateSpawnTarget(type) {
+  if (!isKnownAgentType(type)) throw new Error(`unknown agent: ${type}`);
+  if (isManagerType(type)) throw new Error('manager is always started by Agent Army');
+}
+
+function safeAgentId(type, value) {
+  if (!/^[a-z][a-z0-9-]*$/.test(value)) throw new Error(`invalid agent id: ${value}`);
+  if (value !== type && !value.startsWith(`${type}-`)) throw new Error(`agent id must start with requested type: ${type}`);
+  return value;
+}
+
+function knownAgentIds() {
+  return new Set([...codexAgents.keys(), ...Object.keys(runState.run.agents)]);
+}
+
+const agentIds = new AgentIdAllocator(knownAgentIds);
+
+async function startCodexAgent(agentId, type, { metadata = {}, task } = {}) {
   const agent = await new CodexAgent({
-    name,
+    name: agentId,
+    role: type,
     port: await freePort(),
     apiUrl,
     cwd,
     mcpScript,
-    instructions: prompts[name],
+    instructions: promptForType(type),
   }).start();
-  codexAgents.set(name, agent);
-  army.setAgentStatus(name, 'idle');
-  runState.recordSpawn(name, {
+  codexAgents.set(agentId, agent);
+  army.ensureAgent(agentId, { type, initialStatus: 'idle' });
+  army.setAgentStatus(agentId, 'idle');
+  runState.recordSpawn(agentId, {
+    type,
     port: agent.port,
     threadId: agent.threadId,
     sessionId: agent.threadId,
@@ -156,6 +203,7 @@ async function startCodexAgent(name, { metadata = {}, task } = {}) {
     task,
   });
   writeState();
+  syncPaneSpawn(agentId);
   return agent;
 }
 
@@ -167,37 +215,44 @@ function resumeContextMessage({ resumeSessionId, contextSummary }) {
 }
 
 async function spawnAgent(name, values = {}) {
-  validateSpawnTarget(name);
+  const type = name;
+  validateSpawnTarget(type);
+  const agentId = agentIds.reserve(type, values.agentId ? safeAgentId(type, values.agentId) : undefined);
   const task = values.taskId || values.contextKey || values.title ? {
     taskId: values.taskId,
     contextKey: values.contextKey,
     title: values.title,
     status: 'working',
   } : undefined;
-  const agent = await startCodexAgent(name, {
-    metadata: {
-      resumeSessionId: values.resumeSessionId ?? null,
-      contextSummary: values.contextSummary ?? null,
-    },
-    task,
-  });
-  const contextMessage = resumeContextMessage(values);
-  if (contextMessage) await army.sendAgentMessage(name, contextMessage);
-  return {
-    agent: name,
-    status: army.getAgentStatus(name),
-    port: agent.port,
-    threadId: agent.threadId,
-    sessionId: agent.threadId,
-    resumedFromSessionId: values.resumeSessionId ?? null,
-  };
+  try {
+    const agent = await startCodexAgent(agentId, type, {
+      metadata: {
+        resumeSessionId: values.resumeSessionId ?? null,
+        contextSummary: values.contextSummary ?? null,
+      },
+      task,
+    });
+    const contextMessage = resumeContextMessage(values);
+    if (contextMessage) await army.sendAgentMessage(agentId, contextMessage);
+    return {
+      agent: type,
+      agentId,
+      status: army.getAgentStatus(agentId),
+      port: agent.port,
+      threadId: agent.threadId,
+      sessionId: agent.threadId,
+      resumedFromSessionId: values.resumeSessionId ?? null,
+    };
+  } finally {
+    agentIds.release(agentId);
+  }
 }
 
 async function closeAgent(name, values = {}) {
-  if (!AGENT_NAMES.includes(name)) throw new Error(`unknown agent: ${name}`);
-  if (name === 'manager') throw new Error('manager cannot be closed while Agent Army is running');
+  if (isManagerType(name)) throw new Error('manager cannot be closed while Agent Army is running');
   const agent = codexAgents.get(name);
   if (!agent) throw new Error(`agent is not active: ${name}`);
+  syncPaneClose(name);
   agent.stop();
   codexAgents.delete(name);
   army.setAgentStatus(name, 'closed');
@@ -208,7 +263,7 @@ async function closeAgent(name, values = {}) {
     status: values.status ?? 'completed',
   });
   writeState();
-  return { agent: name, status: 'closed', sessionId: record.sessionId };
+  return { agent: name, agentId: name, type: record.type ?? name, status: 'closed', sessionId: record.sessionId };
 }
 
 function shutdown() {
@@ -228,5 +283,5 @@ await new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(apiPort, '127.0.0.1', resolve);
 });
-await startCodexAgent('manager');
+await startCodexAgent('manager', 'manager');
 writeState();

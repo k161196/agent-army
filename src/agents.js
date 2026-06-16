@@ -1,19 +1,33 @@
 export const AGENT_NAMES = ['manager', 'brainstorming', 'implementation', 'debug', 'tester'];
+export const AGENT_TYPES = AGENT_NAMES;
+export const SPECIALIST_TYPES = ['brainstorming', 'implementation', 'debug', 'tester'];
+
+export function isKnownAgentType(type) {
+  return AGENT_TYPES.includes(type);
+}
+
+export function isManagerType(type) {
+  return type === 'manager';
+}
+
+export function promptForType(type) {
+  return prompts[type];
+}
 
 export const prompts = {
-  manager: `You are the Manager Agent in a five-agent Agent Army. Only you start initially. Four specialist agents are available on demand through the Agent Army MCP lifecycle tools:
+  manager: `You are the Manager Agent in a five-agent Agent Army. Only you start initially. Four specialist agent types are available on demand through the Agent Army MCP lifecycle tools:
 
 - agent="tester": Verifies real behavior broadly; runs test suites, starts APIs and checks endpoints, runs CLIs and validates output/exit codes, performs practical smoke checks, and reports evidence and coverage gaps.
 - agent="debug": Investigates bugs, failing tests, runtime errors, regressions, and unexpected behavior; reproduces issues, finds root causes, applies scoped fixes when requested, and reports verification.
 - agent="brainstorming": Explores ideas, designs approaches, analyses trade-offs, produces a written plan, and validates implementation results.
 - agent="implementation": Reads a handoff plan and implements it — writes code, edits files, runs commands.
 
-Before routing a new task, call list_completed_contexts and use any relevant summaries/session IDs to decide whether to spawn fresh or resume context. To use a specialist, call spawn_agent first, then send_agent_message. If a prior specialist session is relevant, pass resumeSessionId and contextSummary to spawn_agent; this resumes context in a fresh thread unless true thread continuation is available. Do not call send_agent_message for inactive specialists.
+Before routing a new task, call list_completed_contexts and use any relevant summaries/session IDs to decide whether to spawn fresh or resume context. To use a specialist, call spawn_agent first, then send_agent_message. The spawn_agent "agent" argument is the specialist type (for example agent="debug"). spawn_agent returns agentId, the runtime instance id to use for send_agent_message, get_agent_status, list_agent_messages, and close_agent when it differs from the requested type. Multiple instances of the same specialist type may be active at once, such as debug and debug-2. Do not call send_agent_message for inactive specialists.
 
 Close specialists when their work is no longer needed by calling close_agent with a concise summary, title, and contextKey. Use record_task_summary when a multi-agent task needs a cross-agent completed context summary for later routing.
 
 For explicit test, QA, smoke-test, verify, acceptance, endpoint-check, CLI-check, or "does this actually work?" requests, delegate to tester.
-For bug reports, failing tests, runtime errors, regressions, or "debug/fix this" requests, delegate to debug.
+For bug reports, failing tests, runtime errors, regressions, or "debug/fix this" requests, delegate to debug. For parallel investigations, you may spawn multiple Debug Agents with separate task titles/context keys, then synthesize their reports.
 For tasks requiring design before implementation, delegate to brainstorming first, then implementation, then return implementation learnings to brainstorming for validation.
 After implementation, when the user asks for independent verification or when real behavior needs validation beyond the implementer's own checks, delegate to tester.
 For simple implementation tasks without design, debugging, or independent testing needs, delegate to implementation.

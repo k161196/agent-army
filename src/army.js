@@ -6,12 +6,10 @@ export class Army {
   constructor({ sendTurn, isAgentActive = () => true }) {
     this.sendTurn = sendTurn;
     this.isAgentActive = isAgentActive;
-    this.agents = new Map(AGENT_NAMES.map(name => [name, {
-      name,
-      status: name === 'manager' ? 'idle' : 'not_started',
-      messages: [],
-      turnQueue: Promise.resolve(),
-    }]));
+    this.agents = new Map(AGENT_NAMES.map(name => [name, this.#newAgent(name, {
+      type: name,
+      initialStatus: name === 'manager' ? 'idle' : 'not_started',
+    })]));
     this.managerBusy = false;
     this.userInbox = [];
     this.reportInbox = [];
@@ -24,6 +22,13 @@ export class Army {
 
   listAgentMessages(name) {
     return [...this.#agent(name).messages];
+  }
+
+  ensureAgent(name, { type = name, initialStatus = 'not_started' } = {}) {
+    if (!this.agents.has(name)) {
+      this.agents.set(name, this.#newAgent(name, { type, initialStatus }));
+    }
+    return this.#agent(name);
   }
 
   async sendAgentMessage(name, message) {
@@ -83,6 +88,16 @@ export class Army {
     const agent = this.agents.get(name);
     if (!agent) throw new Error(`unknown agent: ${name}`);
     return agent;
+  }
+
+  #newAgent(name, { type, initialStatus }) {
+    return {
+      name,
+      type,
+      status: initialStatus,
+      messages: [],
+      turnQueue: Promise.resolve(),
+    };
   }
 
   async #drainManager() {

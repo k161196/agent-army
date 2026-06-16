@@ -4,7 +4,7 @@ import WebSocket from 'ws';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export function buildCodexArgs({ name, port, apiUrl, mcpScript }) {
+export function buildCodexArgs({ name, role = name, port, apiUrl, mcpScript }) {
   return [
     'app-server',
     '--listen',
@@ -18,13 +18,14 @@ export function buildCodexArgs({ name, port, apiUrl, mcpScript }) {
     '-c',
     `mcp_servers.agent_army.args=["${mcpScript}"]`,
     '-c',
-    `mcp_servers.agent_army.env={AGENT_ARMY_ROLE="${name}",AGENT_ARMY_API="${apiUrl}"}`,
+    `mcp_servers.agent_army.env={AGENT_ARMY_ROLE="${role}",AGENT_ARMY_AGENT_ID="${name}",AGENT_ARMY_API="${apiUrl}"}`,
   ];
 }
 
 export class CodexAgent {
-  constructor({ name, port, apiUrl, cwd, mcpScript, instructions }) {
+  constructor({ name, role = name, port, apiUrl, cwd, mcpScript, instructions }) {
     this.name = name;
+    this.role = role;
     this.port = port;
     this.apiUrl = apiUrl;
     this.cwd = cwd;

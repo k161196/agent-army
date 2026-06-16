@@ -60,8 +60,35 @@ test('records spawn, close, completed context, and active projection', () => {
       contextKey: 'feature:x',
       title: 'Feature X',
       summary: 'Produced a handoff.',
-      agentSessions: [{ agent: 'brainstorming', sessionId: 'thread-brainstorming', threadId: 'thread-brainstorming' }],
+      agentSessions: [{ agent: 'brainstorming', type: 'brainstorming', sessionId: 'thread-brainstorming', threadId: 'thread-brainstorming' }],
       updatedAt: '2026-06-15T10:40:00.000Z',
+    }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('tracks same-type runtime agent ids independently', () => {
+  const { dir, state } = fixture();
+  try {
+    state.create();
+    state.recordSpawn('debug', { type: 'debug', port: 51236, threadId: 'thread-debug' });
+    state.recordSpawn('debug-2', { type: 'debug', port: 51237, threadId: 'thread-debug-2' });
+    state.recordClose('debug-2', {
+      contextKey: 'bug:b',
+      title: 'Bug B',
+      summary: 'Found the second root cause.',
+    });
+
+    assert.deepEqual(Object.keys(state.activeAgents()), ['debug']);
+    assert.equal(state.activeAgents().debug.agentId, 'debug');
+    assert.equal(state.activeAgents().debug.type, 'debug');
+    assert.equal(state.snapshot().agents['debug-2'].type, 'debug');
+    assert.deepEqual(state.snapshot().completedContexts.at(-1).agentSessions, [{
+      agent: 'debug-2',
+      type: 'debug',
+      sessionId: 'thread-debug-2',
+      threadId: 'thread-debug-2',
     }]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
