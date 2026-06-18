@@ -4,7 +4,7 @@ import WebSocket from 'ws';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-export function buildCodexArgs({ name, role = name, port, apiUrl, mcpScript }) {
+export function buildCodexArgs({ name, role = name, port, apiUrl, mcpScript, model }) {
   return [
     'app-server',
     '--listen',
@@ -13,6 +13,7 @@ export function buildCodexArgs({ name, role = name, port, apiUrl, mcpScript }) {
     'features.multi_agent=false',
     '-c',
     'features.child_agents_md=false',
+    ...(model ? ['-c', `model="${model}"`] : []),
     '-c',
     'mcp_servers.agent_army.command="node"',
     '-c',
@@ -23,7 +24,7 @@ export function buildCodexArgs({ name, role = name, port, apiUrl, mcpScript }) {
 }
 
 export class CodexAgent {
-  constructor({ name, role = name, port, apiUrl, cwd, mcpScript, instructions }) {
+  constructor({ name, role = name, port, apiUrl, cwd, mcpScript, instructions, codexHome, model }) {
     this.name = name;
     this.role = role;
     this.port = port;
@@ -31,6 +32,8 @@ export class CodexAgent {
     this.cwd = cwd;
     this.mcpScript = mcpScript;
     this.instructions = instructions;
+    this.codexHome = codexHome;
+    this.model = model;
     this.pending = new Map();
     this.nextId = 1;
     this.activeTurn = null;
@@ -40,8 +43,10 @@ export class CodexAgent {
   async start() {
     const bin = process.env.CODEX_BIN ?? 'codex';
     const extraArgs = process.env.CODEX_EXTRA_ARGS ? JSON.parse(process.env.CODEX_EXTRA_ARGS) : [];
-    this.process = spawn(bin, [...extraArgs, ...buildCodexArgs(this)], {
+    const env = this.codexHome ? { ...process.env, CODEX_HOME: this.codexHome } : process.env;
+    this.process = spawn(bin, [...extraArgs, ...buildCodexArgs({ ...this, model: this.model })], {
       cwd: this.cwd,
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const started = new Promise((resolve, reject) => {

@@ -17,12 +17,12 @@ export function attachAgentPanes(state, target, exec) {
   return panes;
 }
 
-export function attachAgentPane(name, state, panes, target, exec) {
-  if (process.env.CMUX_WORKSPACE_ID) return attachAgentPaneCmux(name, state, panes, exec);
+export function attachAgentPane(name, state, panes, target, exec, { refresh = true } = {}) {
+  if (process.env.CMUX_WORKSPACE_ID) return attachAgentPaneCmux(name, state, panes, exec, { refresh });
   const agent = state.agents[name];
   if (!target || !agent) return undefined;
   if (panes[name]) {
-    refreshPane(name, state, panes, exec);
+    if (refresh) refreshPane(name, state, panes, exec);
     return panes[name];
   }
   const direction = name === 'manager' ? '-v' : '-h';
@@ -119,7 +119,9 @@ function renameCmuxTab(surfaceRef, title, exec) {
   try {
     exec('cmux', ['rename-tab', '--surface', surfaceRef, title]);
   } catch {
-    exec('cmux', ['tab-action', '--action', 'rename', '--surface', surfaceRef, '--title', title]);
+    try {
+      exec('cmux', ['tab-action', '--action', 'rename', '--surface', surfaceRef, '--title', title]);
+    } catch { /* rename is best-effort */ }
   }
 }
 
@@ -131,13 +133,21 @@ function attachAgentPanesCmux(state, exec) {
   return panes;
 }
 
-function attachAgentPaneCmux(name, state, panes, exec) {
+function attachAgentPaneCmux(name, state, panes, exec, { refresh = true } = {}) {
   const workspaceId = process.env.CMUX_WORKSPACE_ID;
   const agent = state.agents[name];
   if (!workspaceId || !agent) return undefined;
   if (panes[name]) {
-    refreshPaneCmux(name, state, panes, exec);
-    return panes[name];
+    if (refresh) {
+      try {
+        refreshPaneCmux(name, state, panes, exec);
+        return panes[name];
+      } catch {
+        delete panes[name]; // stale surface ref — fall through to create new pane
+      }
+    } else {
+      return panes[name];
+    }
   }
   const before = new Set(cmuxPaneRefs(exec).map(p => p.ref));
   const direction = name === 'manager' ? 'down' : 'right';

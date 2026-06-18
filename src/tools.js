@@ -1,6 +1,6 @@
 const schemas = {
   send_agent_message: {
-    description: 'Send work or a follow-up to a runtime agent id returned by spawn_agent and wait for its response. By default this queues behind active work; interrupt: true attempts to cancel active work before sending.',
+    description: 'Send work to a runtime agent id returned by spawn_agent. Returns immediately — do NOT wait for a response. The agent will call report_status when done. By default queues behind active work; interrupt: true cancels active work before sending.',
     inputSchema: {
       type: 'object',
       properties: { agent: { type: 'string' }, message: { type: 'string' }, interrupt: { type: 'boolean' } },

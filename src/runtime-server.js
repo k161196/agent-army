@@ -3,10 +3,12 @@ import { createServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AGENT_NAMES, isKnownAgentType, isManagerType, promptForType } from './agents.js';
+import { AGENT_NAMES, isKnownAgentType, isManagerType, promptForType, AGENT_MODELS } from './agents.js';
 import { AgentIdAllocator } from './agent-id-allocator.js';
+import { buildUiState } from './agent-roster.js';
 import { Army } from './army.js';
 import { CodexAgent } from './codex-agent.js';
 import { attachLifecycleAgentPane, closeLifecycleAgentPane, interruptLifecycleAgentPane } from './pane-lifecycle.js';
@@ -21,6 +23,7 @@ const mcpScript = join(root, 'src', 'mcp-server.js');
 const codexBin = process.env.CODEX_BIN ?? 'codex';
 const sandbox = process.env.AGENT_ARMY_SANDBOX ?? 'workspace-write';
 const approvalPolicy = process.env.AGENT_ARMY_APPROVAL_POLICY ?? 'never';
+const humanInLoop = process.env.HUMAN_IN_LOOP !== 'false';
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -73,6 +76,7 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, apiUrl);
     if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, state());
+    if (req.method === 'GET' && url.pathname === '/ui-state') return json(res, 200, uiState());
     if (req.method === 'GET' && url.pathname === '/run') return json(res, 200, runState.snapshot());
     if (req.method === 'GET' && url.pathname === '/contexts') return json(res, 200, runState.snapshot().completedContexts);
     if (req.method === 'POST' && url.pathname === '/contexts') {
@@ -95,7 +99,9 @@ const server = createServer(async (req, res) => {
       if (req.method === 'GET' && resource === 'status') return json(res, 200, { status: army.getAgentStatus(name) });
       if (req.method === 'GET' && resource === 'messages') return json(res, 200, army.listAgentMessages(name));
       if (req.method === 'POST' && resource === 'messages') {
-        return json(res, 200, { response: await sendAgentMessage(name, await body(req)) });
+        const b = await body(req);
+        sendAgentMessage(name, b).catch(err => console.error(`[${name}] message error: ${err.message}`));
+        return json(res, 200, { ok: true, queued: true });
       }
       if (req.method === 'POST' && resource === 'status') {
         const value = await body(req);
@@ -132,6 +138,15 @@ function state() {
   };
 }
 
+function uiState() {
+  return buildUiState({
+    run: runState.snapshot(),
+    runFile: runState.runFile,
+    codexAgents,
+    getStatus: name => army.getAgentStatus(name),
+  });
+}
+
 function writeState() {
   mkdirSync(runtimeDir, { recursive: true });
   writeFileSync(stateFile, JSON.stringify(state(), null, 2));
@@ -144,7 +159,7 @@ function syncPaneSpawn(agentId) {
     attachLifecycleAgentPane(agentId, state(), {
       panesFile,
       target,
-      exec: (command, args) => execFileSync(command, args, { encoding: 'utf8' }),
+      exec: (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 5000 }),
     });
   } catch (error) {
     console.error(`failed to attach pane for ${agentId}: ${error.message}`);
@@ -156,7 +171,7 @@ function syncPaneClose(agentId) {
   try {
     closeLifecycleAgentPane(agentId, {
       panesFile,
-      exec: (command, args) => execFileSync(command, args, { encoding: 'utf8' }),
+      exec: (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 5000 }),
     });
   } catch (error) {
     console.error(`failed to close pane for ${agentId}: ${error.message}`);
@@ -174,7 +189,7 @@ async function sendAgentMessage(name, { message, interrupt = false } = {}) {
 
   const interrupted = interruptLifecycleAgentPane(name, {
     panesFile,
-    exec: (command, args) => execFileSync(command, args, { encoding: 'utf8' }),
+    exec: (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 5000 }),
   });
   if (!interrupted.ok) throw new Error(`cannot interrupt ${name}: ${interrupted.reason}`);
 
@@ -204,6 +219,10 @@ function knownAgentIds() {
 
 const agentIds = new AgentIdAllocator(knownAgentIds);
 
+function codexHomeForType(type) {
+  return join(homedir(), '.config', 'agent-army', type);
+}
+
 async function startCodexAgent(agentId, type, { metadata = {}, task } = {}) {
   const agent = await new CodexAgent({
     name: agentId,
@@ -212,7 +231,9 @@ async function startCodexAgent(agentId, type, { metadata = {}, task } = {}) {
     apiUrl,
     cwd,
     mcpScript,
-    instructions: promptForType(type),
+    instructions: promptForType(type, { humanInLoop }),
+    codexHome: codexHomeForType(type),
+    model: AGENT_MODELS[type],
   }).start();
   codexAgents.set(agentId, agent);
   army.ensureAgent(agentId, { type, initialStatus: 'idle' });

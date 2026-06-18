@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { attachInitialAgentPanes, attachLifecycleAgentPane, closeLifecycleAgentPane, interruptLifecycleAgentPane } from '../src/pane-lifecycle.js';
+import {
+  attachInitialAgentPanes,
+  attachLifecycleAgentPane,
+  closeLifecycleAgentPane,
+  interruptLifecycleAgentPane,
+  syncAgentPanes,
+} from '../src/pane-lifecycle.js';
 
 function withCmux(callback) {
   const previous = process.env.CMUX_WORKSPACE_ID;
@@ -16,64 +22,103 @@ function withCmux(callback) {
   }
 }
 
-test('lifecycle attach persists a cmux surface per runtime agent id', () => {
+function tempPanesDir() {
+  return mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+}
+
+function readJson(file) {
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+function specialistState() {
+  return {
+    cwd: '/workspace',
+    agents: {
+      manager: { port: 1001, threadId: 'manager-thread', type: 'manager' },
+      debug: { port: 1002, threadId: 'debug-thread', type: 'debug' },
+      'debug-2': { port: 1003, threadId: 'debug-thread-2', type: 'debug' },
+    },
+  };
+}
+
+test('initial attach refreshes persisted manager pane alongside specialist panes', () => {
   withCmux(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+    const dir = tempPanesDir();
     const panesFile = join(dir, 'panes.json');
     try {
-      writeFileSync(panesFile, JSON.stringify({ debug: 'surface:1' }));
-      const state = {
-        cwd: '/workspace',
-        agents: {
-          debug: { port: 1003, threadId: 'debug-thread', type: 'debug' },
-          'debug-2': { port: 1004, threadId: 'debug-thread-2', type: 'debug' },
-        },
-      };
+      writeFileSync(panesFile, JSON.stringify({ manager: 'surface:1', debug: 'surface:2' }));
       const calls = [];
-      const exec = (command, args) => {
-        calls.push([command, args]);
-        if (command === 'cmux' && args[0] === 'list-panes') {
-          return JSON.stringify(calls.filter(([, item]) => item[0] === 'list-panes').length === 1
-            ? { panes: [{ ref: 'pane:1', surface_refs: ['surface:1'] }] }
-            : { panes: [{ ref: 'pane:1', surface_refs: ['surface:1'] }, { ref: 'pane:2', surface_refs: ['surface:2'] }] });
-        }
-        if (command === 'cmux' && args[0] === 'list-pane-surfaces') {
-          return JSON.stringify({ surfaces: [{ ref: 'surface:1', title: 'debug' }] });
-        }
-        return '';
-      };
 
-      const pane = attachLifecycleAgentPane('debug-2', state, { panesFile, target: null, exec });
-
-      assert.equal(pane, 'surface:2');
-      assert.deepEqual(JSON.parse(readFileSync(panesFile, 'utf8')), {
-        debug: 'surface:1',
-        'debug-2': 'surface:2',
+      const panes = attachInitialAgentPanes(specialistState(), {
+        panesFile,
+        target: null,
+        exec: (command, args) => {
+          calls.push([command, args]);
+          if (command === 'cmux' && args[0] === 'list-pane-surfaces') {
+            return JSON.stringify({
+              surfaces: [
+                { ref: 'surface:1', title: 'manager' },
+                { ref: 'surface:2', title: 'debug' },
+              ],
+            });
+          }
+          if (command === 'cmux' && args[0] === 'list-panes') {
+            return JSON.stringify({ panes: [{ ref: 'pane:2', surface_refs: ['surface:2'] }] });
+          }
+          return '';
+        },
       });
-      assert.deepEqual(calls.find(([, args]) => args[0] === 'rename-tab')?.[1], [
-        'rename-tab', '--surface', 'surface:2', 'debug-2',
-      ]);
+
+      assert.equal(panes.manager, 'surface:1');
+      assert.equal(panes.debug, 'surface:2');
+      assert.equal(calls.some(([, args]) => args.some(v => String(v).includes('manager-thread'))), true);
+      assert.equal(calls.some(([, args]) => args.includes('surface:2') && args[0] === 'send'), true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 });
 
-test('initial attach reuses persisted runtime agent cmux surfaces', () => {
+test('sync preserves existing manager and specialist panes without re-sending commands', () => {
   withCmux(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+    const dir = tempPanesDir();
+    const panesFile = join(dir, 'panes.json');
+    try {
+      writeFileSync(panesFile, JSON.stringify({ manager: 'surface:1', debug: 'surface:2' }));
+      const calls = [];
+      const panes = { manager: 'surface:1', debug: 'surface:2' };
+
+      syncAgentPanes(specialistState(), panes, {
+        panesFile,
+        target: null,
+        exec: (command, args) => {
+          calls.push([command, args]);
+          return '';
+        },
+      });
+
+      assert.equal(panes.manager, 'surface:1');
+      assert.equal(panes.debug, 'surface:2');
+      assert.equal(calls.some(([, args]) => args.some(v => String(v).includes('manager-thread'))), false);
+      const sentToExisting = calls.filter(([, args]) =>
+        args[0] === 'send' && (args.includes('surface:1') || args.includes('surface:2')),
+      );
+      assert.equal(sentToExisting.length, 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('lifecycle attach refreshes existing manager pane', () => {
+  withCmux(() => {
+    const dir = tempPanesDir();
     const panesFile = join(dir, 'panes.json');
     try {
       writeFileSync(panesFile, JSON.stringify({ manager: 'surface:1' }));
-      const state = {
-        cwd: '/workspace',
-        agents: {
-          manager: { port: 1001, threadId: 'manager-thread' },
-        },
-      };
       const calls = [];
 
-      const panes = attachInitialAgentPanes(state, {
+      const pane = attachLifecycleAgentPane('manager', specialistState(), {
         panesFile,
         target: null,
         exec: (command, args) => {
@@ -85,29 +130,81 @@ test('initial attach reuses persisted runtime agent cmux surfaces', () => {
         },
       });
 
-      assert.deepEqual(panes, { manager: 'surface:1' });
-      assert.equal(calls.some(([, args]) => args[0] === 'new-pane'), false);
-      assert.equal(calls.some(([, args]) => args[0] === 'send'), true);
+      assert.equal(pane, 'surface:1');
+      assert.deepEqual(readJson(panesFile), { manager: 'surface:1' });
+      assert.equal(calls.some(([, args]) => args.some(v => String(v).includes('manager-thread'))), true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 });
 
-test('lifecycle close removes only the requested runtime agent cmux surface', () => {
+test('lifecycle attach persists cmux surface per specialist runtime agent id', () => {
   withCmux(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+    const dir = tempPanesDir();
+    const panesFile = join(dir, 'panes.json');
+    try {
+      writeFileSync(panesFile, JSON.stringify({ debug: 'surface:1' }));
+      const calls = [];
+      const exec = (command, args) => {
+        calls.push([command, args]);
+        if (command === 'cmux' && args[0] === 'list-panes') {
+          const nth = calls.filter(([name, callArgs]) => name === 'cmux' && callArgs[0] === 'list-panes').length;
+          return JSON.stringify(
+            nth === 1
+              ? { panes: [{ ref: 'pane:1', surface_refs: ['surface:1'] }] }
+              : {
+                  panes: [
+                    { ref: 'pane:1', surface_refs: ['surface:1'] },
+                    { ref: 'pane:2', surface_refs: ['surface:2'] },
+                  ],
+                },
+          );
+        }
+        if (command === 'cmux' && args[0] === 'list-pane-surfaces') {
+          return JSON.stringify({ surfaces: [{ ref: 'surface:1', title: 'debug' }] });
+        }
+        if (command === 'cmux' && args[0] === 'new-pane') {
+          return JSON.stringify({ pane: { ref: 'pane:2' }, surface: { ref: 'surface:2' } });
+        }
+        return '';
+      };
+
+      const pane = attachLifecycleAgentPane('debug-2', specialistState(), {
+        panesFile,
+        target: null,
+        exec,
+      });
+
+      assert.equal(pane, 'surface:2');
+      assert.deepEqual(readJson(panesFile), { debug: 'surface:1', 'debug-2': 'surface:2' });
+      assert.equal(calls.some(([, args]) => args[0] === 'new-pane'), true);
+      assert.equal(
+        calls.some(([, args]) => args.some(value => String(value).includes('debug-thread-2'))),
+        true,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test('lifecycle close removes only requested runtime agent cmux surface', () => {
+  withCmux(() => {
+    const dir = tempPanesDir();
     const panesFile = join(dir, 'panes.json');
     try {
       writeFileSync(panesFile, JSON.stringify({ debug: 'surface:1', 'debug-2': 'surface:2' }));
       const calls = [];
 
-      assert.equal(closeLifecycleAgentPane('debug', {
-        panesFile,
-        exec: (command, args) => calls.push([command, args]),
-      }), true);
-
-      assert.deepEqual(JSON.parse(readFileSync(panesFile, 'utf8')), { 'debug-2': 'surface:2' });
+      assert.equal(
+        closeLifecycleAgentPane('debug', {
+          panesFile,
+          exec: (command, args) => calls.push([command, args]),
+        }),
+        true,
+      );
+      assert.deepEqual(readJson(panesFile), { 'debug-2': 'surface:2' });
       assert.deepEqual(calls, [['cmux', ['close-surface', '--surface', 'surface:1']]]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -115,18 +212,13 @@ test('lifecycle close removes only the requested runtime agent cmux surface', ()
   });
 });
 
-test('lifecycle close removes empty pane mapping files', () => {
+test('lifecycle removes empty pane mapping files', () => {
   withCmux(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+    const dir = tempPanesDir();
     const panesFile = join(dir, 'panes.json');
     try {
       writeFileSync(panesFile, JSON.stringify({ debug: 'surface:1' }));
-
-      closeLifecycleAgentPane('debug', {
-        panesFile,
-        exec: () => '',
-      });
-
+      closeLifecycleAgentPane('debug', { panesFile, exec: () => '' });
       assert.equal(existsSync(panesFile), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -136,21 +228,19 @@ test('lifecycle close removes empty pane mapping files', () => {
 
 test('lifecycle interrupt reads persisted panes without mutating missing mappings', () => {
   withCmux(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'agent-army-panes-'));
+    const dir = tempPanesDir();
     const panesFile = join(dir, 'panes.json');
     try {
       writeFileSync(panesFile, JSON.stringify({ debug: 'surface:1' }));
       const calls = [];
 
-      assert.deepEqual(interruptLifecycleAgentPane('debug-2', {
+      const result = interruptLifecycleAgentPane('debug-2', {
         panesFile,
         exec: (command, args) => calls.push([command, args]),
-      }), {
-        ok: false,
-        reason: 'no pane is attached; retry without interrupt or attach panes first',
       });
-
-      assert.deepEqual(JSON.parse(readFileSync(panesFile, 'utf8')), { debug: 'surface:1' });
+      assert.equal(result.ok, false);
+      assert.equal(result.reason.includes('no pane is attached'), true);
+      assert.deepEqual(readJson(panesFile), { debug: 'surface:1' });
       assert.deepEqual(calls, []);
     } finally {
       rmSync(dir, { recursive: true, force: true });

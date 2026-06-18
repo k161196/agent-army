@@ -1,6 +1,6 @@
 import { AGENT_NAMES } from './agents.js';
 
-const STATUSES = new Set(['not_started', 'starting', 'idle', 'working', 'blocked', 'completed', 'failed', 'closed']);
+const STATUSES = new Set(['not_started', 'starting', 'idle', 'working', 'blocked', 'awaiting_approval', 'completed', 'failed', 'closed']);
 
 export class Army {
   constructor({ sendTurn, isAgentActive = () => true }) {
