@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderManagerScreen, startManagerTui } from './src/manager-tui.js';
 import { attachInitialAgentPanes, readPanes, syncAgentPanes } from './src/pane-lifecycle.js';
+import { runContextCli } from './src/context-cli.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const runtimeDir = join(process.cwd(), '.agent-army');
+const runtimeDir = join(homedir(), '.agent-army');
 const stateFile = join(runtimeDir, 'state.json');
 const panesFile = join(runtimeDir, 'panes.json');
 const logFile = join(runtimeDir, 'server.log');
@@ -77,11 +79,12 @@ async function interactive(state, { managerOnly = false } = {}) {
   });
 }
 
-function attachSession(state, sessionId) {
-  const entry = Object.entries(state.agents ?? {}).find(
+async function attachSession(state, sessionId) {
+  const liveState = await request(state, '/health');
+  const entry = Object.entries(liveState.agents ?? {}).find(
     ([, a]) => a.threadId === sessionId || a.sessionId === sessionId,
   );
-  if (!entry) throw new Error(`no active agent with session ID: ${sessionId}`);
+  if (!entry) throw new Error(`no active agent with session ID: ${sessionId} (agent may be closed)`);
   const [name, agent] = entry;
   const bin = process.env.CODEX_BIN ?? 'codex';
   console.log(`Attaching to ${name} (${sessionId})...`);
@@ -116,7 +119,9 @@ async function watchStatus(state) {
   });
 }
 
-if (command === 'start') {
+if (command === 'context' || command === 'issue') {
+  await runContextCli({ cwd: process.cwd(), argv: args });
+} else if (command === 'start') {
   await interactive(await ensureStarted());
 } else if (command === 'attach') {
   const state = readState();
@@ -124,7 +129,7 @@ if (command === 'start') {
   const subArg = args.filter(a => !a.startsWith('--')).find(a => a !== 'attach');
   const isStatus = args.includes('--status') || subArg === 'status';
   if (isStatus) await watchStatus(state);
-  else if (subArg && subArg !== 'status') attachSession(state, subArg);
+  else if (subArg && subArg !== 'status') await attachSession(state, subArg);
   else await interactive(state, { managerOnly: true });
 } else if (command === 'status') {
   const state = readState();

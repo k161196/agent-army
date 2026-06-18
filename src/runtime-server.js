@@ -11,12 +11,13 @@ import { AgentIdAllocator } from './agent-id-allocator.js';
 import { buildUiState } from './agent-roster.js';
 import { Army } from './army.js';
 import { CodexAgent } from './codex-agent.js';
+import { openContextService } from './context-app.js';
 import { attachLifecycleAgentPane, closeLifecycleAgentPane, interruptLifecycleAgentPane } from './pane-lifecycle.js';
 import { RunState } from './run-state.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const cwd = process.env.AGENT_ARMY_CWD ?? root;
-const runtimeDir = join(cwd, '.agent-army');
+const runtimeDir = join(homedir(), '.agent-army');
 const stateFile = join(runtimeDir, 'state.json');
 const panesFile = join(runtimeDir, 'panes.json');
 const mcpScript = join(root, 'src', 'mcp-server.js');
@@ -78,12 +79,30 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, state());
     if (req.method === 'GET' && url.pathname === '/ui-state') return json(res, 200, uiState());
     if (req.method === 'GET' && url.pathname === '/run') return json(res, 200, runState.snapshot());
-    if (req.method === 'GET' && url.pathname === '/contexts') return json(res, 200, runState.snapshot().completedContexts);
-    if (req.method === 'POST' && url.pathname === '/contexts') {
-      const value = await body(req);
-      return json(res, 200, runState.recordCompletedContext(value));
-    }
-    if (req.method === 'POST' && url.pathname === '/message') {
+  if (req.method === 'GET' && url.pathname === '/contexts') return json(res, 200, runState.snapshot().completedContexts);
+  if (req.method === 'POST' && url.pathname === '/contexts') {
+    const value = await body(req);
+    return json(res, 200, runState.recordCompletedContext(value));
+  }
+  if (req.method === 'POST' && url.pathname === '/context/issues/intake') {
+    const { issueKey } = await body(req);
+    return json(res, 200, await withContextService((context) => context.service.intakeJiraIssue(issueKey)));
+  }
+  const contextCandidateMatch = url.pathname.match(/^\/context\/issues\/([^/]+)\/candidates$/);
+  if (req.method === 'GET' && contextCandidateMatch) {
+    const [, issueKey] = contextCandidateMatch;
+    return json(res, 200, await withContextService((context) => context.service.suggestImplementations(issueKey)));
+  }
+  const contextImplementationMatch = url.pathname.match(/^\/context\/implementations\/(\d+)$/);
+  if (req.method === 'GET' && contextImplementationMatch) {
+    const [, implementationId] = contextImplementationMatch;
+    return json(res, 200, await withContextService((context) => context.store.getImplementation(Number(implementationId))));
+  }
+  if (req.method === 'POST' && url.pathname === '/context/notes') {
+    const payload = await body(req);
+    return json(res, 200, await withContextService((context) => context.store.addNote(payload)));
+  }
+  if (req.method === 'POST' && url.pathname === '/message') {
       const { message } = await body(req);
       return json(res, 200, { response: await army.sendUserMessage(message) });
     }
@@ -150,6 +169,15 @@ function uiState() {
 function writeState() {
   mkdirSync(runtimeDir, { recursive: true });
   writeFileSync(stateFile, JSON.stringify(state(), null, 2));
+}
+
+async function withContextService(callback) {
+  const context = openContextService({ cwd });
+  try {
+    return await callback(context);
+  } finally {
+    context.close();
+  }
 }
 
 function syncPaneSpawn(agentId) {

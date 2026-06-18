@@ -13,7 +13,7 @@ test('runtime publishes agent state only after lifecycle pane sync', () => {
   const body = match[0];
   assert.ok(
     body.indexOf('syncPaneSpawn(agentId)') < body.indexOf('writeState()'),
-    'state.json should not appear ready before panes.json persisted',
+    'state.json should not appear ready before panes.json is persisted',
   );
 });
 
@@ -25,11 +25,11 @@ test('runtime interrupt helper sends pane interrupt before bypass follow-up', ()
   assert.ok(body.includes('interruptLifecycleAgentPane(name'), 'helper sends pane interrupt');
   assert.ok(
     body.indexOf('interruptLifecycleAgentPane(name') < body.indexOf('agent.waitForIdle({ timeoutMs: 5000 })'),
-    'runtime waits idle after sending interrupt',
+    'runtime waits for idle after sending the interrupt',
   );
   assert.ok(
     body.indexOf('agent.waitForIdle({ timeoutMs: 5000 })') < body.indexOf('bypassQueueAfterInterrupt: true'),
-    'runtime bypasses queue only after active turn idles',
+    'runtime bypasses the queue only after the active turn idles',
   );
 });
 
@@ -37,4 +37,15 @@ test('runtime exposes dedicated ui-state endpoint', () => {
   const source = readFileSync(join(root, 'src', 'runtime-server.js'), 'utf8');
   assert.match(source, /url\.pathname === '\/ui-state'/);
   assert.match(source, /buildUiState/);
+});
+
+test('runtime exposes context workflow endpoints through the shared context service', () => {
+  const source = readFileSync(join(root, 'src', 'runtime-server.js'), 'utf8');
+  assert.ok(source.includes("url.pathname === '/context/issues/intake'"));
+  assert.ok(source.includes('/context/issues/'));
+  assert.ok(source.includes('/candidates'));
+  assert.ok(source.includes('context.store.getImplementation'));
+  assert.ok(source.includes("url.pathname === '/context/notes'"));
+  assert.ok(source.includes('withContextService'));
+  assert.ok(source.includes('openContextService'));
 });

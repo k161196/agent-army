@@ -1,9 +1,14 @@
 const schemas = {
   send_agent_message: {
-    description: 'Send work to a runtime agent id returned by spawn_agent. Returns immediately — do NOT wait for a response. The agent will call report_status when done. By default queues behind active work; interrupt: true cancels active work before sending.',
+    description:
+      'Send work to a runtime agent id returned by spawn_agent. Returns immediately and queues by default.',
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string' }, message: { type: 'string' }, interrupt: { type: 'boolean' } },
+      properties: {
+        agent: { type: 'string' },
+        message: { type: 'string' },
+        interrupt: { type: 'boolean' },
+      },
       required: ['agent', 'message'],
     },
   },
@@ -11,7 +16,9 @@ const schemas = {
     description: 'Get the current status of a runtime agent id returned by spawn_agent.',
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string' } },
+      properties: {
+        agent: { type: 'string' },
+      },
       required: ['agent'],
     },
   },
@@ -19,12 +26,14 @@ const schemas = {
     description: 'List messages associated with a runtime agent id returned by spawn_agent.',
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string' } },
+      properties: {
+        agent: { type: 'string' },
+      },
       required: ['agent'],
     },
   },
   spawn_agent: {
-    description: 'Start a known specialist Agent type for a task. Returns agentId; use that id for follow-up tools. For closed prior sessions, this resumes context by injecting the prior summary/session ID into a fresh thread.',
+    description: 'Start a known specialist agent type for a task.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,7 +49,7 @@ const schemas = {
     },
   },
   close_agent: {
-    description: 'Close an active runtime agent id and optionally store a concise completed-task summary for later Manager routing.',
+    description: 'Close an active runtime agent id and optionally record a summary.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -48,21 +57,21 @@ const schemas = {
         summary: { type: 'string' },
         title: { type: 'string' },
         contextKey: { type: 'string' },
-        status: { type: 'string', enum: ['completed', 'blocked', 'failed'] },
+        status: { type: 'string' },
       },
       required: ['agent'],
     },
   },
   list_run_agents: {
-    description: 'List active and historical Agent records for the current Agent Army run.',
+    description: 'List active and historical agent records for the current Agent Army run.',
     inputSchema: { type: 'object', properties: {} },
   },
   list_completed_contexts: {
-    description: 'List completed context summaries and prior session IDs recorded in the current run.',
+    description: 'List completed context summaries recorded in the current run.',
     inputSchema: { type: 'object', properties: {} },
   },
   record_task_summary: {
-    description: 'Record a completed context summary with related Agent session IDs for future routing within this run.',
+    description: 'Record a completed task summary for future routing in this run.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -83,6 +92,51 @@ const schemas = {
         },
       },
       required: ['contextKey', 'title', 'summary'],
+    },
+  },
+  context_intake_issue: {
+    description: 'Fetch a Jira issue, store its snapshot locally, and return ranked implementation matches.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issueKey: { type: 'string' },
+      },
+      required: ['issueKey'],
+    },
+  },
+  context_match_issue: {
+    description: 'Return ranked implementation candidates for a stored issue.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issueKey: { type: 'string' },
+      },
+      required: ['issueKey'],
+    },
+  },
+  context_get_implementation: {
+    description: 'Fetch one implementation record and its attached repos.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        implementationId: { type: 'number' },
+      },
+      required: ['implementationId'],
+    },
+  },
+  context_add_note: {
+    description: 'Append an attributed note to an implementation or issue.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entityType: { type: 'string', enum: ['implementation', 'issue'] },
+        entityId: { type: 'number' },
+        authorType: { type: 'string', enum: ['user', 'agent'] },
+        authorId: { type: 'string' },
+        trustLevel: { type: 'string', enum: ['hint', 'verified'] },
+        body: { type: 'string' },
+      },
+      required: ['entityType', 'entityId', 'authorType', 'authorId', 'trustLevel', 'body'],
     },
   },
   report_status: {
@@ -108,6 +162,10 @@ const capabilities = {
     'send_agent_message',
     'get_agent_status',
     'list_agent_messages',
+    'context_intake_issue',
+    'context_match_issue',
+    'context_get_implementation',
+    'context_add_note',
   ],
   brainstorming: ['report_status'],
   implementation: ['report_status'],
@@ -116,22 +174,28 @@ const capabilities = {
 };
 
 function toolContext(value) {
-  return typeof value === 'string' ? { role: value, agentId: value } : {
-    role: value.role,
-    agentId: value.agentId ?? value.role,
-  };
+  return typeof value === 'string'
+    ? { role: value, agentId: value }
+    : { role: value.role, agentId: value.agentId ?? value.role };
 }
 
 export function toolDefinitions(role) {
-  return (capabilities[toolContext(role).role] ?? []).map(name => ({ name, ...schemas[name] }));
+  return (capabilities[toolContext(role).role] ?? []).map((name) => ({ name, ...schemas[name] }));
 }
 
 export async function callTool(context, name, args, request) {
   const { role, agentId } = toolContext(context);
-  if (!(capabilities[role] ?? []).includes(name)) throw new Error(`tool ${name} is not available to ${role}`);
+
+  if (!(capabilities[role] ?? []).includes(name)) {
+    throw new Error(`tool ${name} is not available to ${role}`);
+  }
+
   switch (name) {
     case 'send_agent_message':
-      return request(`/agents/${args.agent}/messages`, { message: args.message, interrupt: args.interrupt ?? false });
+      return request(`/agents/${args.agent}/messages`, {
+        message: args.message,
+        interrupt: args.interrupt ?? false,
+      });
     case 'get_agent_status':
       return request(`/agents/${args.agent}/status`);
     case 'list_agent_messages':
@@ -155,6 +219,14 @@ export async function callTool(context, name, args, request) {
         summary: args.summary,
         agentSessions: args.agentSessions ?? [],
       });
+    case 'context_intake_issue':
+      return request('/context/issues/intake', { issueKey: args.issueKey });
+    case 'context_match_issue':
+      return request(`/context/issues/${args.issueKey}/candidates`);
+    case 'context_get_implementation':
+      return request(`/context/implementations/${args.implementationId}`);
+    case 'context_add_note':
+      return request('/context/notes', args);
     case 'report_status':
       return request(`/agents/${agentId}/status`, { status: args.status, message: args.message });
     default:
