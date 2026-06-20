@@ -41,6 +41,7 @@ function seedImplementation(store, fields = {}) {
     name: 'Billing API',
     description: 'Billing endpoints',
   });
+  const repo = store.createRepo({ organizationId: organization.id, name: 'api', path: '/repos/api' });
 
   return store.createImplementation({
     featureId: feature.id,
@@ -53,7 +54,7 @@ function seedImplementation(store, fields = {}) {
     invocationExample: 'curl -X POST /v1/charges',
     expectedResult: '201 Created',
     verificationCheck: 'response includes charge id',
-    repos: [{ repoName: 'api', repoPath: '/repos/api' }],
+    repos: [{ repoId: repo.id }],
     ...fields,
   });
 }

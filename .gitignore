@@ -1,1 +1,3 @@
-.agent-army/
+.runtime/
+.env
+.agent-army

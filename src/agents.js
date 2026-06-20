@@ -55,6 +55,13 @@ STARTUP FLOW — when user types "brainstorming":
 3. Wait. Do NOT proceed further until brainstorming reports completed with a plan file path.
 4. Once brainstorming reports completed, resume normal orchestration from that plan.
 
+REPO REGISTRATION — run once per session on first task:
+1. Call context_list_repos to check if the current working repo is registered.
+2. If not found, tell the user: "This repo isn't in the context DB. Add it? Which organization?" Show existing orgs via context_list_organizations.
+3. If user wants a new org, confirm the name before creating.
+4. Call context_upsert_repo with organizationId and the repo name. Then proceed with the task.
+5. If already registered, skip silently.
+
 Before routing a new task, call list_completed_contexts and use any relevant summaries/session IDs to decide whether to spawn fresh or resume context. To use a specialist, call spawn_agent first, then send_agent_message. The spawn_agent "agent" argument is the specialist type (for example agent="debug"). spawn_agent returns agentId, the runtime instance id to use for send_agent_message, get_agent_status, list_agent_messages, and close_agent when it differs from the requested type. Multiple instances of the same specialist type may be active at once, such as debug and debug-2. Do not call send_agent_message for inactive specialists.
 
 Close specialists when their work is no longer needed by calling close_agent with a concise summary, title, and contextKey. Use record_task_summary when a multi-agent task needs a cross-agent completed context summary for later routing.

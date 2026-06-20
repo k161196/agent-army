@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-army-context": {
+      "command": "node",
+      "args": ["src/context-mcp-server.js"],
+      "env": {
+        "AGENT_ARMY_DB_PATH": "/Users/kiran/Kiran/brain/obsidian-brain/05_Agent-Data/context.db"
+      }
+    }
+  }
+}

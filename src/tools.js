@@ -124,6 +124,71 @@ const schemas = {
       required: ['implementationId'],
     },
   },
+  context_list_organizations: {
+    description: 'List all organizations in the context database.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  context_create_organization: {
+    description: 'Create a new organization.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+      },
+      required: ['name'],
+    },
+  },
+  context_list_repos: {
+    description: 'List repos, optionally filtered by organizationId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        organizationId: { type: 'number' },
+      },
+    },
+  },
+  context_get_repo: {
+    description: 'Fetch one repo by id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repoId: { type: 'number' },
+      },
+      required: ['repoId'],
+    },
+  },
+  context_upsert_repo: {
+    description: 'Find or create a repo by organization + name (GitHub identifier, e.g. owner/repo).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        organizationId: { type: 'number' },
+        name: { type: 'string', description: 'GitHub repo identifier, e.g. owner/repo' },
+        url: { type: 'string', description: 'GitHub URL or identifier' },
+      },
+      required: ['organizationId', 'name'],
+    },
+  },
+  context_list_branches: {
+    description: 'List branches, optionally filtered by repoId.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repoId: { type: 'number' },
+      },
+    },
+  },
+  context_upsert_branch: {
+    description: 'Find or create a branch by repo + name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        repoId: { type: 'number' },
+        name: { type: 'string' },
+      },
+      required: ['repoId', 'name'],
+    },
+  },
   context_add_note: {
     description: 'Append an attributed note to an implementation or issue.',
     inputSchema: {
@@ -165,6 +230,13 @@ const capabilities = {
     'context_intake_issue',
     'context_match_issue',
     'context_get_implementation',
+    'context_list_organizations',
+    'context_create_organization',
+    'context_list_repos',
+    'context_get_repo',
+    'context_upsert_repo',
+    'context_list_branches',
+    'context_upsert_branch',
     'context_add_note',
   ],
   brainstorming: ['report_status'],
@@ -225,6 +297,20 @@ export async function callTool(context, name, args, request) {
       return request(`/context/issues/${args.issueKey}/candidates`);
     case 'context_get_implementation':
       return request(`/context/implementations/${args.implementationId}`);
+    case 'context_list_organizations':
+      return request('/context/organizations');
+    case 'context_create_organization':
+      return request('/context/organizations', { name: args.name });
+    case 'context_list_repos':
+      return request(args.organizationId ? `/context/repos?organizationId=${args.organizationId}` : '/context/repos');
+    case 'context_get_repo':
+      return request(`/context/repos/${args.repoId}`);
+    case 'context_upsert_repo':
+      return request('/context/repos', args);
+    case 'context_list_branches':
+      return request(args.repoId ? `/context/branches?repoId=${args.repoId}` : '/context/branches');
+    case 'context_upsert_branch':
+      return request('/context/branches', args);
     case 'context_add_note':
       return request('/context/notes', args);
     case 'report_status':

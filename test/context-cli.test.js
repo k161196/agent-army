@@ -78,7 +78,7 @@ test('context commands initialize and store implementations', () => {
 
     const shown = runCli(cwd, ['context', 'show', 'implementation', String(implementation.id)]);
     assert.equal(shown.name, 'Charge endpoint');
-    assert.equal(shown.repos[0].repoName, 'api');
+assert.equal(shown.repos[0].name, 'api');
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

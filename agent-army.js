@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderManagerScreen, startManagerTui } from './src/manager-tui.js';
@@ -9,7 +8,17 @@ import { attachInitialAgentPanes, readPanes, syncAgentPanes } from './src/pane-l
 import { runContextCli } from './src/context-cli.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const runtimeDir = join(homedir(), '.agent-army');
+
+// Load .env from repo root
+const envFile = join(root, '.env');
+if (existsSync(envFile)) {
+  for (const line of readFileSync(envFile, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([^#=\s][^=]*?)\s*=\s*(.*?)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
+  }
+}
+
+const runtimeDir = join(root, '.runtime');
 const stateFile = join(runtimeDir, 'state.json');
 const panesFile = join(runtimeDir, 'panes.json');
 const logFile = join(runtimeDir, 'server.log');

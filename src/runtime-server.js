@@ -17,7 +17,7 @@ import { RunState } from './run-state.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const cwd = process.env.AGENT_ARMY_CWD ?? root;
-const runtimeDir = join(homedir(), '.agent-army');
+const runtimeDir = join(root, '.runtime');
 const stateFile = join(runtimeDir, 'state.json');
 const panesFile = join(runtimeDir, 'panes.json');
 const mcpScript = join(root, 'src', 'mcp-server.js');
@@ -101,6 +101,37 @@ const server = createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/context/notes') {
     const payload = await body(req);
     return json(res, 200, await withContextService((context) => context.store.addNote(payload)));
+  }
+  if (req.method === 'GET' && url.pathname === '/context/organizations') {
+    return json(res, 200, await withContextService((context) => context.store.listOrganizations()));
+  }
+  if (req.method === 'POST' && url.pathname === '/context/organizations') {
+    const { name } = await body(req);
+    return json(res, 200, await withContextService((context) => context.store.createOrganization({ name })));
+  }
+  if (req.method === 'GET' && url.pathname === '/context/repos') {
+    const orgId = url.searchParams.get('organizationId');
+    return json(res, 200, await withContextService((context) => {
+      const repos = context.store.listRepos();
+      return orgId ? repos.filter((r) => r.organizationId === Number(orgId)) : repos;
+    }));
+  }
+  const contextRepoMatch = url.pathname.match(/^\/context\/repos\/(\d+)$/);
+  if (req.method === 'GET' && contextRepoMatch) {
+    const [, repoId] = contextRepoMatch;
+    return json(res, 200, await withContextService((context) => context.store.getRepo(Number(repoId))));
+  }
+  if (req.method === 'POST' && url.pathname === '/context/repos') {
+    const payload = await body(req);
+    return json(res, 200, await withContextService((context) => context.store.upsertRepo(payload)));
+  }
+  if (req.method === 'GET' && url.pathname === '/context/branches') {
+    const repoId = url.searchParams.get('repoId');
+    return json(res, 200, await withContextService((context) => context.store.listBranches(repoId ? Number(repoId) : null)));
+  }
+  if (req.method === 'POST' && url.pathname === '/context/branches') {
+    const payload = await body(req);
+    return json(res, 200, await withContextService((context) => context.store.upsertBranch(payload)));
   }
   if (req.method === 'POST' && url.pathname === '/message') {
       const { message } = await body(req);

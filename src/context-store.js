@@ -63,6 +63,29 @@ function mapIssue(row) {
   };
 }
 
+function mapRepo(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    name: row.name,
+    url: row.url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapBranch(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    repoId: row.repo_id,
+    name: row.name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function mapNote(row) {
   return {
     id: row.id,
@@ -173,13 +196,67 @@ export function createContextStore({ dbPath, now = () => new Date() }) {
     return db.prepare('SELECT * FROM features ORDER BY id').all().map((row) => getFeature(row.id));
   }
 
+  function createRepo({ organizationId, name, url = null }) {
+    const timestamp = timestamps();
+    const result = db
+      .prepare(
+        'INSERT INTO repos (organization_id, name, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(organizationId, name, url, timestamp, timestamp);
+    return getRepo(Number(result.lastInsertRowid));
+  }
+
+  function getRepo(id) {
+    return mapRepo(db.prepare('SELECT * FROM repos WHERE id = ?').get(id));
+  }
+
+  function listRepos() {
+    return db.prepare('SELECT * FROM repos ORDER BY id').all().map(mapRepo);
+  }
+
+  function upsertRepo({ organizationId, name, url = null }) {
+    const existing = db.prepare('SELECT * FROM repos WHERE organization_id = ? AND name = ?').get(organizationId, name);
+    if (existing) return mapRepo(existing);
+    return createRepo({ organizationId, name, url });
+  }
+
+  function createBranch({ repoId, name }) {
+    const timestamp = timestamps();
+    const result = db
+      .prepare(
+        'INSERT INTO branches (repo_id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+      )
+      .run(repoId, name, timestamp, timestamp);
+    return getBranch(Number(result.lastInsertRowid));
+  }
+
+  function getBranch(id) {
+    return mapBranch(db.prepare('SELECT * FROM branches WHERE id = ?').get(id));
+  }
+
+  function listBranches(repoId) {
+    const rows = repoId
+      ? db.prepare('SELECT * FROM branches WHERE repo_id = ? ORDER BY id').all(repoId)
+      : db.prepare('SELECT * FROM branches ORDER BY id').all();
+    return rows.map(mapBranch);
+  }
+
+  function upsertBranch({ repoId, name }) {
+    const existing = db.prepare('SELECT * FROM branches WHERE repo_id = ? AND name = ?').get(repoId, name);
+    if (existing) return mapBranch(existing);
+    return createBranch({ repoId, name });
+  }
+
   function listImplementationRepos(implementationId) {
     return db
       .prepare(
-        'SELECT repo_name, repo_path FROM implementation_repos WHERE implementation_id = ? ORDER BY id',
+        `SELECT r.*, ir.branch_id AS ir_branch_id FROM repos r
+         JOIN implementation_repos ir ON ir.repo_id = r.id
+         WHERE ir.implementation_id = ?
+         ORDER BY ir.id`,
       )
       .all(implementationId)
-      .map((row) => ({ repoName: row.repo_name, repoPath: row.repo_path }));
+      .map((row) => ({ ...mapRepo(row), branchId: row.ir_branch_id ?? null }));
   }
 
   function createImplementation({
@@ -236,8 +313,8 @@ export function createContextStore({ dbPath, now = () => new Date() }) {
 
     for (const repo of repos) {
       db.prepare(
-        'INSERT INTO implementation_repos (implementation_id, repo_name, repo_path, created_at) VALUES (?, ?, ?, ?)',
-      ).run(implementationId, repo.repoName, repo.repoPath ?? null, timestamp);
+        'INSERT INTO implementation_repos (implementation_id, repo_id, branch_id, created_at) VALUES (?, ?, ?, ?)',
+      ).run(implementationId, repo.repoId, repo.branchId ?? null, timestamp);
     }
 
     return getImplementation(implementationId);
@@ -267,8 +344,8 @@ export function createContextStore({ dbPath, now = () => new Date() }) {
     db.prepare(
       `
         UPDATE implementations
-        SET status = ?, target = ?, run_instructions = ?, test_instructions = ?, invocation_example = ?, expected_result = ?,
-            verification_check = ?, code_pointers_json = ?, updated_at = ?
+        SET status = ?, target = ?, run_instructions = ?, test_instructions = ?, invocation_example = ?,
+            expected_result = ?, verification_check = ?, code_pointers_json = ?, updated_at = ?
         WHERE id = ?
       `,
     ).run(
@@ -384,6 +461,31 @@ export function createContextStore({ dbPath, now = () => new Date() }) {
     return db.prepare('SELECT * FROM issues ORDER BY id').all().map(mapIssue);
   }
 
+  function query(sql, params = []) {
+    const stmt = db.prepare(sql);
+    return Array.isArray(params) ? stmt.all(...params) : stmt.all(params);
+  }
+
+  function execute(sql, params = []) {
+    const stmt = db.prepare(sql);
+    const result = Array.isArray(params) ? stmt.run(...params) : stmt.run(params);
+    return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) };
+  }
+
+  function schema(tables = null) {
+    if (!tables) {
+      return db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .all()
+        .map((r) => r.name);
+    }
+    return db
+      .prepare(
+        `SELECT name, sql FROM sqlite_master WHERE type='table' AND name IN (${tables.map(() => '?').join(',')}) ORDER BY name`,
+      )
+      .all(...tables);
+  }
+
   function close() {
     db.close();
   }
@@ -401,6 +503,10 @@ export function createContextStore({ dbPath, now = () => new Date() }) {
     createFeature,
     getFeature,
     listFeatures,
+    createRepo,
+    getRepo,
+    listRepos,
+    upsertRepo,
     createImplementation,
     getImplementation,
     listImplementations,
@@ -411,5 +517,12 @@ export function createContextStore({ dbPath, now = () => new Date() }) {
     upsertIssue,
     getIssueByKey,
     listIssues,
+    createBranch,
+    getBranch,
+    listBranches,
+    upsertBranch,
+    query,
+    execute,
+    schema,
   };
 }

@@ -27,6 +27,8 @@ test('bootstraps required context tables', () => {
     for (const name of [
       'schema_migrations',
       'organizations',
+      'repos',
+      'branches',
       'projects',
       'features',
       'implementations',
@@ -41,7 +43,7 @@ test('bootstraps required context tables', () => {
   });
 });
 
-test('creates and reads organization, project, feature, and implementation records', () => {
+test('creates and reads organization, project, feature, repo, and implementation records', () => {
   withStore((store) => {
     const organization = store.createOrganization({ name: 'Acme' });
     const project = store.createProject({
@@ -54,6 +56,7 @@ test('creates and reads organization, project, feature, and implementation recor
       name: 'Billing API',
       description: 'Customer billing workflow',
     });
+    const repo = store.createRepo({ organizationId: organization.id, name: 'api', url: 'acme/api' });
     const implementation = store.createImplementation({
       featureId: feature.id,
       name: 'Charge endpoint',
@@ -65,19 +68,90 @@ test('creates and reads organization, project, feature, and implementation recor
       expectedResult: '201 Created',
       verificationCheck: 'response contains charge id',
       codePointers: [{ repo: 'api', path: 'src/routes/charges.js', symbol: 'createCharge' }],
-      repos: [{ repoName: 'api', repoPath: '/repos/api' }],
+      repos: [{ repoId: repo.id }],
     });
 
     assert.equal(store.getOrganization(organization.id).name, 'Acme');
     assert.equal(store.getProject(project.id).key, 'OPS');
     assert.equal(store.getFeature(feature.id).name, 'Billing API');
+    assert.equal(store.getRepo(repo.id).organizationId, organization.id);
 
     const persisted = store.getImplementation(implementation.id);
     assert.equal(persisted.target, '/v1/charges');
-    assert.deepEqual(persisted.repos, [{ repoName: 'api', repoPath: '/repos/api' }]);
+    assert.equal(persisted.repos.length, 1);
+    assert.equal(persisted.repos[0].name, 'api');
+    assert.equal(persisted.repos[0].url, 'acme/api');
+    assert.equal(persisted.repos[0].organizationId, organization.id);
     assert.deepEqual(persisted.codePointers, [
       { repo: 'api', path: 'src/routes/charges.js', symbol: 'createCharge' },
     ]);
+  });
+});
+
+test('creates and lists repos with organization', () => {
+  withStore((store) => {
+    const org = store.createOrganization({ name: 'Acme' });
+    const r1 = store.createRepo({ organizationId: org.id, name: 'acme/api', url: 'https://github.com/acme/api' });
+    const r2 = store.createRepo({ organizationId: org.id, name: 'acme/web' });
+
+    assert.equal(r1.organizationId, org.id);
+    assert.equal(r1.name, 'acme/api');
+    assert.equal(r1.url, 'https://github.com/acme/api');
+    assert.equal(r2.url, null);
+
+    const upserted = store.upsertRepo({ organizationId: org.id, name: 'acme/api' });
+    assert.equal(upserted.id, r1.id);
+
+    const all = store.listRepos();
+    assert.equal(all.length, 2);
+  });
+});
+
+test('creates and lists branches', () => {
+  withStore((store) => {
+    const org = store.createOrganization({ name: 'Acme' });
+    const repo = store.createRepo({ organizationId: org.id, name: 'acme/api' });
+
+    const b1 = store.createBranch({ repoId: repo.id, name: 'main' });
+    const b2 = store.createBranch({ repoId: repo.id, name: 'feat/auth' });
+
+    assert.equal(b1.repoId, repo.id);
+    assert.equal(b1.name, 'main');
+
+    const upserted = store.upsertBranch({ repoId: repo.id, name: 'main' });
+    assert.equal(upserted.id, b1.id);
+
+    const all = store.listBranches(repo.id);
+    assert.equal(all.length, 2);
+    assert.equal(all[1].name, 'feat/auth');
+
+    const allGlobal = store.listBranches();
+    assert.equal(allGlobal.length, 2);
+
+    store.upsertBranch({ repoId: repo.id, name: 'fix/bug' });
+    assert.equal(store.listBranches(repo.id).length, 3);
+  });
+});
+
+test('implementation repo linked to branch', () => {
+  withStore((store) => {
+    const org = store.createOrganization({ name: 'Acme' });
+    const project = store.createProject({ organizationId: org.id, key: 'OPS', name: 'Operations' });
+    const feature = store.createFeature({ projectId: project.id, name: 'Auth' });
+    const repo = store.createRepo({ organizationId: org.id, name: 'acme/api' });
+    const branch = store.createBranch({ repoId: repo.id, name: 'feat/auth' });
+
+    const impl = store.createImplementation({
+      featureId: feature.id,
+      name: 'Auth endpoint',
+      type: 'api',
+      status: 'incomplete',
+      repos: [{ repoId: repo.id, branchId: branch.id }],
+    });
+
+    assert.equal(impl.repos.length, 1);
+    assert.equal(impl.repos[0].name, 'acme/api');
+    assert.equal(impl.repos[0].branchId, branch.id);
   });
 });
 

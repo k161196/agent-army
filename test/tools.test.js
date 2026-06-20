@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { toolDefinitions, callTool } from '../src/tools.js';
 
-test('manager receives routing inspection and context tools', () => {
+test('manager receives routing inspection context tools', () => {
   assert.deepEqual(toolDefinitions('manager').map((tool) => tool.name), [
     'spawn_agent',
     'close_agent',
@@ -16,6 +16,13 @@ test('manager receives routing inspection and context tools', () => {
     'context_intake_issue',
     'context_match_issue',
     'context_get_implementation',
+    'context_list_organizations',
+    'context_create_organization',
+    'context_list_repos',
+    'context_get_repo',
+    'context_upsert_repo',
+    'context_list_branches',
+    'context_upsert_branch',
     'context_add_note',
   ]);
 });
@@ -53,6 +60,7 @@ test('maps manager agent tools onto HTTP API calls', async () => {
     contextKey: 'bug:test',
     title: 'Fix test',
     summary: 'done',
+    agentSessions: [],
   }, request);
   await callTool('manager', 'context_intake_issue', { issueKey: 'OPS-101' }, request);
   await callTool('manager', 'context_match_issue', { issueKey: 'OPS-101' }, request);

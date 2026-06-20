@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+
 import { openContextService } from './context-app.js';
 
 function parseFlags(args) {
@@ -43,6 +45,11 @@ function findOrCreateProject(store, { organizationId, key, name }) {
   return store.listProjects().find((project) => project.key === key) ?? store.createProject({ organizationId, key, name });
 }
 
+function getOrganizationForFeature(store, feature) {
+  const project = store.getProject(feature.projectId);
+  return store.getOrganization(project.organizationId);
+}
+
 function findFeature(store, flags) {
   if (flags['feature-id']) {
     return store.getFeature(Number(flags['feature-id']));
@@ -63,7 +70,7 @@ function findFeature(store, flags) {
 export async function runContextCli({ cwd = process.cwd(), argv, stdout = process.stdout }) {
   const [namespace, action, ...rest] = argv;
   const flags = parseFlags(rest);
-  const context = openContextService({ cwd });
+  const context = openContextService({ cwd, dbPath: join(cwd, '.agent-army', 'context.db') });
 
   try {
     if (namespace === 'context') {
@@ -86,19 +93,37 @@ export async function runContextCli({ cwd = process.cwd(), argv, stdout = proces
         return print(stdout, { organization, project, feature });
       }
 
+      if (action === 'add-repo') {
+        const org = findOrCreateOrganization(context.store, requireFlag(flags, 'organization'));
+        const repo = context.store.createRepo({
+          organizationId: org.id,
+          name: requireFlag(flags, 'name'),
+          path: flags.path ?? null,
+        });
+        return print(stdout, repo);
+      }
+
       if (action === 'add-implementation') {
         const feature = findFeature(context.store, flags);
         if (!feature) {
           throw new Error('unknown feature');
         }
 
+        const org = flags.organization
+          ? findOrCreateOrganization(context.store, flags.organization)
+          : getOrganizationForFeature(context.store, feature);
+
         const repos = String(requireFlag(flags, 'repo'))
           .split(',')
           .filter(Boolean)
-          .map((repoName) => ({
-            repoName,
-            repoPath: flags['repo-path'] ?? null,
-          }));
+          .map((name) => {
+            const repo = context.store.upsertRepo({
+              organizationId: org.id,
+              name: name.trim(),
+              path: flags['repo-path'] ?? null,
+            });
+            return { repoId: repo.id };
+          });
 
         const implementation = context.store.createImplementation({
           featureId: feature.id,
