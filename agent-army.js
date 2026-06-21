@@ -167,6 +167,39 @@ if (command === 'context' || command === 'issue') {
   rmSync(panesFile, { force: true });
   if (state && alive(state)) await request(state, '/stop', {});
   console.log('Agent Army stopped');
+} else if (command === 'git') {
+  const gitArgs = args.filter(a => a !== 'git');
+  const subCmd = gitArgs[0];
+  if (subCmd !== 'clone') throw new Error(`aa git only supports clone; got: ${subCmd}`);
+
+  const url = gitArgs[1];
+  if (!url) throw new Error('usage: aa git clone <url>');
+
+  // supports git@github.com:Org/repo.git and https://github.com/Org/repo.git
+  const urlMatch = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);
+  if (!urlMatch) throw new Error(`cannot parse org/repo from URL: ${url}`);
+  const [, org, repo] = urlMatch;
+
+  const configPath = join(process.env.HOME, '.config/agent-army/config.toml');
+  let baseFolder = '~/agent-army';
+  if (existsSync(configPath)) {
+    const cfg = readFileSync(configPath, 'utf8');
+    const m = cfg.match(/^\s*BASE_FOLDER\s*=\s*["']?([^"'\n]+?)["']?\s*$/m);
+    if (m) baseFolder = m[1].trim();
+  }
+  baseFolder = baseFolder.replace(/^~/, process.env.HOME);
+
+  let branch = 'main';
+  try {
+    const lsOut = execFileSync('git', ['ls-remote', '--symref', url, 'HEAD'], { encoding: 'utf8' });
+    const bm = lsOut.match(/ref: refs\/heads\/(\S+)\s+HEAD/);
+    if (bm) branch = bm[1];
+  } catch { /* fallback to main */ }
+
+  const targetDir = join(baseFolder, 'organizations', org, 'projects', repo, 'branches', branch);
+  mkdirSync(targetDir, { recursive: true });
+  console.log(`Cloning into ${targetDir}`);
+  execFileSync('git', ['clone', url, targetDir], { stdio: 'inherit' });
 } else {
   throw new Error(`unknown command: ${command}`);
 }
